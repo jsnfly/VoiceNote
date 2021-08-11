@@ -3,7 +3,7 @@ import time
 import torch
 import numpy as np
 import wave
-from functools import lru_cache
+from pathlib import Path
 from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
 
 CHUNK = 1024
@@ -12,6 +12,7 @@ CHANNELS = 1
 RATE = 16000
 WAVE_OUTPUT_FILENAME = "output.wav"
 MODEL = 'jonatasgrosman/wav2vec2-large-xlsr-53-german'
+NUM_EMPTY_FRAMES_TO_STOP = 100
 
 audio = pyaudio.PyAudio()
 
@@ -38,8 +39,8 @@ class Sample:
         self.frames.append(frame)
 
     def is_finished(self):
-        if len(self.frames) > 5:
-            return self.to_numpy()[-5:].mean() == 0
+        if len(self.frames) > NUM_EMPTY_FRAMES_TO_STOP:
+            return self.to_numpy()[-NUM_EMPTY_FRAMES_TO_STOP:].mean() == 0
         return False
 
     def is_empty(self):
@@ -48,6 +49,13 @@ class Sample:
 current_sample = Sample([])
 processor = Wav2Vec2Processor.from_pretrained(MODEL)
 model = Wav2Vec2ForCTC.from_pretrained(MODEL)
+
+def save_audio_and_prediction(save_path, sample, prediction):
+    save_path = Path(save_path) / time.strftime("%Y%m%d-%H%M%S")
+    save_path.mkdir(parents=True)
+    with open(save_path / 'prediction.txt', 'w') as f:
+        f.write(prediction)
+    sample.to_wav_file(str(save_path / 'sample.wav'))
 
 def callback(in_data, frame_count, time_info, status):
     global current_sample
@@ -62,7 +70,8 @@ def callback(in_data, frame_count, time_info, status):
             predicted_ids = torch.argmax(logits, dim=-1)
             prediction = processor.batch_decode(predicted_ids)[0]
             print("Prediction:", prediction)
-            if prediction == 'STOP':
+            save_audio_and_prediction('outputs', current_sample, prediction)
+            if prediction in ['STOP', 'STOPP']:
                 message = pyaudio.paComplete
         current_sample = Sample([])
     return (in_data, message)
