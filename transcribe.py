@@ -6,7 +6,7 @@ import wave
 from functools import lru_cache
 from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
 
-CHUNK = 4096
+CHUNK = 1024
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 16000
@@ -51,6 +51,8 @@ model = Wav2Vec2ForCTC.from_pretrained(MODEL)
 
 def callback(in_data, frame_count, time_info, status):
     global current_sample
+
+    message = pyaudio.paContinue
     current_sample.append(in_data)
     if current_sample.is_finished():
         if not current_sample.is_empty():
@@ -58,11 +60,11 @@ def callback(in_data, frame_count, time_info, status):
             with torch.no_grad():
                 logits = model(inputs.input_values, attention_mask=inputs.attention_mask).logits
             predicted_ids = torch.argmax(logits, dim=-1)
-            print("Prediction:", processor.batch_decode(predicted_ids))
+            prediction = processor.batch_decode(predicted_ids)[0]
+            print("Prediction:", prediction)
+            if prediction == 'STOP':
+                message = pyaudio.paComplete
         current_sample = Sample([])
-    # from pdb import set_trace; set_trace()
-    # message = pyaudio.paComplete
-    message = pyaudio.paContinue
     return (in_data, message)
 
 stream = audio.open(
