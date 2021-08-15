@@ -44,9 +44,7 @@ class Sample:
     def __init__(self, frames):
         self.frames = frames
         self.frames_per_second = RATE / CHUNK
-
-        # TODO: is not right, because Frames do not have a consitent size (see below).
-        self.num_seconds_to_stop = 20
+        self.num_seconds_to_stop = 2
 
     def to_wav_file(self, file_path):
         wf = wave.open(file_path, 'wb')
@@ -102,10 +100,8 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
     with conn:
         print('Connected by', addr)
         while True:
-
-            # TODO: resulting arrays have inconsistent sizes. The data passed in by the client has correct size.
-            # https://stackoverflow.com/questions/1708835/python-socket-receive-incoming-packets-always-have-a-different-size
-            current_sample.append(Frame(conn.recv(CHUNK * 16)))
+            num_bytes_per_chunk = CHUNK * 2  # Since each datapoint has 16 bits.
+            current_sample.append(Frame(conn.recv(CHUNK * 2, socket.MSG_WAITALL)))
             if current_sample.is_finished():
                 if not current_sample.is_empty():
                     data = current_sample.to_numpy()
