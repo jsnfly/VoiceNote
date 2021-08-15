@@ -74,12 +74,11 @@ class Sample:
 
     @staticmethod
     def frames_are_empty(frames):
-        std_devs = np.array([f.std for f in frames])
+        std_dev = np.array([f.std for f in frames]).std()
 
         # TODO: Parameter
-        return std_devs.max() / std_devs.min() < 15
+        return std_dev < 15
 
-    
 
 def save_audio_and_prediction(save_path, sample, prediction):
     save_path = Path(save_path) / time.strftime("%Y%m%d-%H%M%S")
