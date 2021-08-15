@@ -15,5 +15,6 @@ ssh pi $client_cmd & python3 server.py && fg
 # ./configure && make
 # sudo make install
 # sudo apt install portaudio19-dev
+# pip3 install pyaudio
 
 # and ssh-setup

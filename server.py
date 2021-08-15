@@ -6,6 +6,7 @@ import torch
 import torchaudio
 import numpy as np
 from pathlib import Path
+from functools import cached_property
 from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
 
 
@@ -18,25 +19,45 @@ RATE = 44_100
 CHUNK = 4096
 CHANNELS = 1
 FORMAT = pyaudio.paInt16
-NUM_EMPTY_FRAMES_TO_STOP = 100
 
 audio = pyaudio.PyAudio()
+
+class Frame:
+
+    def __init__(self, binary_data):
+        self._data = binary_data
+
+    @property
+    def data(self):
+        return self._data
+
+    @cached_property
+    def numpy(self):
+        return np.frombuffer(self._data, dtype=np.int16)
+
+    @cached_property
+    def std(self):
+        return self.numpy.std()
 
 class Sample:
 
     def __init__(self, frames):
         self.frames = frames
-    
-    def to_numpy(self):
-        return np.frombuffer(b''.join(self.frames), dtype=np.int16)
+        self.frames_per_second = RATE / CHUNK
+
+        # TODO: is not right, because Frames do not have a consitent size (see below).
+        self.num_seconds_to_stop = 20
 
     def to_wav_file(self, file_path):
         wf = wave.open(file_path, 'wb')
         wf.setnchannels(CHANNELS)
         wf.setsampwidth(audio.get_sample_size(FORMAT))
         wf.setframerate(RATE)
-        wf.writeframes(b''.join(self.frames))
+        wf.writeframes(b''.join([f.data for f in self.frames]))
         wf.close()
+
+    def to_numpy(self):
+        return np.concatenate([f.numpy for f in self.frames])
 
     def __add__(self, other):
         return self.__class__(self.frames + other.frames)
@@ -45,12 +66,22 @@ class Sample:
         self.frames.append(frame)
 
     def is_finished(self):
-        if len(self.frames) > NUM_EMPTY_FRAMES_TO_STOP:
-            return np.all(self.to_numpy()[-NUM_EMPTY_FRAMES_TO_STOP:] < 300)
-        return False
+        num_empty_frames_to_stop = int(self.frames_per_second * self.num_seconds_to_stop)
+        if len(self.frames) < num_empty_frames_to_stop:
+            return False
+        return self.frames_are_empty(self.frames[-num_empty_frames_to_stop:])
 
     def is_empty(self):
-        return np.all(self.to_numpy() < 500)
+        return self.frames_are_empty(self.frames)
+
+    @staticmethod
+    def frames_are_empty(frames):
+        std_devs = np.array([f.std for f in frames])
+
+        # TODO: Parameter
+        return std_devs.max() / std_devs.min() < 15
+
+    
 
 def save_audio_and_prediction(save_path, sample, prediction):
     save_path = Path(save_path) / time.strftime("%Y%m%d-%H%M%S")
@@ -71,8 +102,10 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
     with conn:
         print('Connected by', addr)
         while True:
-            frame = conn.recv(CHUNK)
-            current_sample.append(frame)
+
+            # TODO: resulting arrays have inconsistent sizes. The data passed in by the client has correct size.
+            # https://stackoverflow.com/questions/1708835/python-socket-receive-incoming-packets-always-have-a-different-size
+            current_sample.append(Frame(conn.recv(CHUNK * 16)))
             if current_sample.is_finished():
                 if not current_sample.is_empty():
                     data = current_sample.to_numpy()
