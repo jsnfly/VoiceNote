@@ -8,7 +8,8 @@ FORMAT = pyaudio.paInt16  # https://en.wikipedia.org/wiki/Audio_bit_depth
 CHANNELS = 1
 RATE = 44_100
 
-HOST = socket.gethostname()
+HOST = '0.0.0.0'
+PORT = 12345
 
 
 def connect(sock):

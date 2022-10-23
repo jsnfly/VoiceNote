@@ -1,8 +1,12 @@
-import socket
+import asyncio
 import wave
+import torch
 import pyaudio
 import numpy as np
 import time
+import whisper
+from torchaudio.transforms import Resample
+
 
 audio = pyaudio.PyAudio()
 
@@ -11,6 +15,10 @@ PORT = 12345
 CHANNELS = 1
 RATE = 44100
 FORMAT = pyaudio.paInt16
+
+model = whisper.load_model("base", device='cuda')
+options = whisper.DecodingOptions()
+resampler = Resample(RATE, 16_000)
 
 class Sample:
 
@@ -22,6 +30,9 @@ class Sample:
 
     def numpy(self):
         return np.frombuffer(b''.join(self.fragments), dtype=np.int16)
+
+    def torch(self):
+        return torch.frombuffer(b''.join(self.fragments), dtype=torch.int16)
 
     def is_finished(self):
         pass
@@ -38,25 +49,52 @@ class Sample:
         wf.close()
 
 
-def predict():
-    time.sleep(0.1)
+def predict(sample):
+    print('Predicting...')
+    return whisper.decode(model, preprocess(sample), options)
 
 
-def main():
+def preprocess(sample):
+    data = sample.torch().float() / 32768.  # Is also done in whisper#load_audio and seems to make data similar.
+    resampled = resampler(data)
+    padded = whisper.pad_or_trim(resampled)
+    mel = whisper.log_mel_spectrogram(padded).to(model.device)
+    return mel
+
+
+async def read(reader):
+    print('Reading...')
+    return await reader.read(2**42)  # Large number to read the whole buffer.
+
+
+async def handle_connection(reader, writer):
     sample = Sample()
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind((socket.gethostname(), PORT))
-        sock.listen()
-        conn_sock, conn_addr = sock.accept()
-        with conn_sock:
-            print('Connected by', conn_addr)
-            time.sleep(0.1)
-            for i in range(20):
-                sample.append(conn_sock.recv(2**17, socket.MSG_DONTWAIT))
-                predict()
-            sample.to_wav_file('test.wav')
+    while not reader.at_eof():
+        start = time.time()
+        sample.append(await read(reader))
+        result = predict(sample)
+        if result.no_speech_prob > 0.5:
+            sample = Sample()
+        else:
+            print(result.text)
+        end = time.time()
+        if (diff := 1 - (end - start)) > 0:
+            # Only perform at most one prediction per second.
+            await asyncio.sleep(diff)
+    print('Connection closed.')
 
+async def run_server():
+    server = await asyncio.start_server(handle_connection, '0.0.0.0', PORT)
+    async with server:
+        await server.serve_forever()
+
+
+async def main():
+    await run_server()
 
 
 if __name__ == '__main__':
-    main()
+
+    # asyncio is currently not really needed but it makes some things a bit cleaner (e.g. setting up the connection/
+    # receiving the data)
+    asyncio.run(main())
