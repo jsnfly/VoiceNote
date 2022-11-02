@@ -1,22 +1,27 @@
 import socket
 import time
 import pyaudio
-
-FORMAT = pyaudio.paInt16  # https://en.wikipedia.org/wiki/Audio_bit_depth
-
-# TODO: get from device_info?
-CHANNELS = 1
-RATE = 44_100
+import json
 
 HOST = '0.0.0.0'
 PORT = 12345
+
+audio_config = {
+    'format': pyaudio.paInt16,  # https://en.wikipedia.org/wiki/Audio_bit_depth
+    'channels': 1,
+    'rate': 44_100
+}
 
 
 def connect(sock):
     while True:
         try:
-            sock.connect((HOST, 12345))
+            sock.connect((HOST, PORT))
             print('Connected.')
+            sock.sendall(json.dumps(audio_config).encode())
+            data = sock.recv(64)
+            assert data == b'OK'
+            print('Initialized.')
             break
         except ConnectionRefusedError:
             print('Trying to connect...')
@@ -36,9 +41,7 @@ def main():
             return (in_data, message)
 
         stream = audio.open(
-            format=FORMAT,
-            channels=CHANNELS,
-            rate=RATE,
+            **audio_config,
             input=True,
             frames_per_buffer=0,
             input_device_index=None,
