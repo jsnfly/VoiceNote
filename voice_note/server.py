@@ -3,7 +3,6 @@ import pyaudio
 import time
 import json
 import whisper
-from pathlib import Path
 from sample import Sample
 
 PORT = 12345
@@ -18,13 +17,18 @@ def predict(sample):
         print(sample.result.text)
 
 
+async def initialize(reader, writer):
+    audio_config = json.loads(await read(reader))
+    writer.write(b'OK')
+    return audio_config
+
+
 async def read(reader):
     return await reader.read(2**42)  # Large number to read the whole buffer.
 
 
 async def handle_connection(reader, writer):
-    audio_config = json.loads(await read(reader))
-    writer.write(b'OK')
+    audio_config = await initialize(reader, writer)
     assert audio_config['format'] == pyaudio.paInt16
     bytes_per_second = audio_config['rate'] * 2  # Times 2 because each data point has 16 bits.
 
@@ -38,13 +42,9 @@ async def handle_connection(reader, writer):
                 print('FINISHED')
                 print(sample.result.text)
                 if SAVE_PREDICTIONS:
-                    save_path = Path('outputs') / time.strftime("%Y%m%d-%H%M%S")
-                    save_path.mkdir(parents=True)
-                    with open(save_path / 'prediction.txt', 'w') as f:
-                        f.write(sample.result.text)
-                    sample.to_wav_file(str(save_path / 'sample.wav'), audio_config['channels'],
-                                       audio.get_sample_size(audio_config['format']))
-
+                    sample.save(
+                        'outputs', audio_config['channels'], audio.get_sample_size(audio_config['format'])
+                    )
             initial_fragment = b''.join(sample.fragments)[-int(SAMPLE_OVERLAP * bytes_per_second):]
             sample = Sample([initial_fragment], audio_config['rate'])
         end = time.time()

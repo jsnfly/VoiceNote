@@ -2,6 +2,7 @@ import wave
 import torch
 import whisper
 import time
+from pathlib import Path
 from functools import cached_property
 from torchaudio.transforms import Resample
 
@@ -44,6 +45,16 @@ class Sample:
     @property
     def is_empty(self):
         return self.result is not None and self.result.no_speech_prob > 0.7
+
+    def save(self, save_dir, channels, sample_size):
+        assert self.result is not None, "Please call `.transcribe` first"
+
+        save_path = Path(save_dir) / time.strftime("%Y%m%d-%H%M%S")
+        save_path.mkdir(parents=True)
+        with open(save_path / 'prediction.txt', 'w') as f:
+            f.write(self.result.text)
+        self.to_wav_file(str(save_path / 'sample.wav'), channels, sample_size)
+
 
     def to_wav_file(self, file_path, channels, sample_size):
         wf = wave.open(file_path, 'wb')
