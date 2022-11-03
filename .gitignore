@@ -1,1 +1,3 @@
-outputs
+voice_note/outputs
+
+*__pycache__*
