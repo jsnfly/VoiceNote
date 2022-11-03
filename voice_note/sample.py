@@ -23,6 +23,7 @@ class Sample:
         if self.result is None or self.result.text != result.text:
             self.time_of_last_transcription_change = time.time()
         elif time.time() - self.time_of_last_transcription_change > 2:
+            # TODO: is there a better way to do this?
             self._is_finished = True
         self.result = result
 
@@ -53,6 +54,7 @@ class Sample:
         save_path.mkdir(parents=True)
         with open(save_path / 'prediction.txt', 'w') as f:
             f.write(self.result.text)
+        # TODO: audio files partially have a lot of "no speech" at the end.
         self.to_wav_file(str(save_path / 'sample.wav'), channels, sample_size)
 
 
