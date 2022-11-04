@@ -31,6 +31,7 @@ def finish_sample(sample, audio_config):
     if not sample.is_empty:
         if SAVE_PREDICTIONS:
             sample.save('outputs', audio_config['channels'], audio.get_sample_size(audio_config['format']))
+        breakpoint()
         print("\nFinished: ", sample.result.text)
     bytes_per_second = audio_config['rate'] * 2  # Times 2 because each data point has 16 bits.
     initial_fragment = b''.join(sample.fragments)[-int(SAMPLE_OVERLAP * bytes_per_second):]

@@ -3,28 +3,36 @@ import torch
 import whisper
 import time
 from pathlib import Path
-from functools import cached_property
 from torchaudio.transforms import Resample
-from utils.decoding_task import TimeStampDecodingTask
+from whisper.decoding import DecodingTask
 
 class Sample:
 
     def __init__(self, fragments, rate):
         self.fragments = fragments
-        self.rate = rate
+
+        self.resampler = Resample(rate, 16_000)
+        self.decoding_task = None
+
         self.result: whisper.DecodingResult = None
         self.time_of_last_transcription_change = None
         self._is_finished = False
 
-    def append(self, fragments):
-        self.fragments.append(fragments)
+    def append(self, fragment):
+        self.fragments.append(fragment)
 
     def transcribe(self, model, options):
-        result = TimeStampDecodingTask(model, options).run(self.mel_spectrogram.unsqueeze(0).to(model.device))[0]
-        if self.result is None or self.result.text != result.text:
+        if self.decoding_task is None:
+            self.decoding_task = DecodingTask(model, options)
+        result = self.decoding_task.run(self.mel_spectrogram.unsqueeze(0).to(model.device))[0]
+        last_token = result.tokens[-1]
+        assert last_token >= self.decoding_task.tokenizer.timestamp_begin, 'Last token is supposed to be a timestamp.'
+
+        if self.result is None or self.result.tokens[-1] != last_token:
+            # If the final timestamp is different there was additional speech added since last transcription.
             self.time_of_last_transcription_change = time.time()
         elif time.time() - self.time_of_last_transcription_change > 2:
-            # TODO: is there a better way to do this?
+            # If no speech was added for two seconds the sample is assumed to be finished.
             self._is_finished = True
         self.result = result
 
@@ -35,10 +43,6 @@ class Sample:
         resampled = self.resampler(data)
         padded = whisper.pad_or_trim(resampled)
         return whisper.log_mel_spectrogram(padded)
-
-    @cached_property
-    def resampler(self):
-        return Resample(self.rate, 16_000)
 
     @property
     def is_finished(self):
@@ -55,7 +59,6 @@ class Sample:
         save_path.mkdir(parents=True)
         with open(save_path / 'prediction.txt', 'w') as f:
             f.write(self.result.text)
-        # TODO: audio files partially have a lot of "no speech" at the end.
         self.to_wav_file(str(save_path / 'sample.wav'), channels, sample_size)
 
 
@@ -63,6 +66,18 @@ class Sample:
         wf = wave.open(file_path, 'wb')
         wf.setnchannels(channels)
         wf.setsampwidth(sample_size)
-        wf.setframerate(self.rate)
-        wf.writeframes(b''.join(self.fragments))
+        wf.setframerate(self.resampler.orig_freq)
+
+        data = b''.join(self.fragments)
+
+        # 1 second is added to account for inaccuracies.
+        speech_duration = (self.last_token - self.decoding_task.tokenizer.timestamp_begin) * 0.02 + 1
+
+        num_speech_bytes = min(len(data), int(speech_duration * self.resampler.orig_freq * sample_size))
+        wf.writeframes(data[:num_speech_bytes])
         wf.close()
+
+
+    @property
+    def last_token(self):
+        return (None if self.result is None else self.result.tokens[-1])
