@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from functools import cached_property
 from torchaudio.transforms import Resample
+from utils.decoding_task import TimeStampDecodingTask
 
 class Sample:
 
@@ -19,7 +20,7 @@ class Sample:
         self.fragments.append(fragments)
 
     def transcribe(self, model, options):
-        result = whisper.decode(model, self.mel_spectrogram.to(model.device), options)
+        result = TimeStampDecodingTask(model, options).run(self.mel_spectrogram.unsqueeze(0).to(model.device))[0]
         if self.result is None or self.result.text != result.text:
             self.time_of_last_transcription_change = time.time()
         elif time.time() - self.time_of_last_transcription_change > 2:

@@ -3,7 +3,7 @@ import pyaudio
 import time
 import json
 import whisper
-from sample import Sample
+from utils.sample import Sample
 
 PORT = 12345
 MAXIMUM_PREDICTION_FREQ = 1.  # Predictions/Second
