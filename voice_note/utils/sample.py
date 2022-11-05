@@ -26,10 +26,10 @@ class Sample:
             self.decoding_task = DecodingTask(model, options)
         result = self.decoding_task.run(self.mel_spectrogram.unsqueeze(0).to(model.device))[0]
         last_token = result.tokens[-1]
-        assert last_token >= self.decoding_task.tokenizer.timestamp_begin, 'Last token is supposed to be a timestamp.'
-
         if self.result is None or self.result.tokens[-1] != last_token:
             # If the final timestamp is different there was additional speech added since last transcription.
+            # Sometimes the final token is not a timestamp. This is also a sign that the transcription is still
+            # changing.
             self.time_of_last_transcription_change = time.time()
         elif time.time() - self.time_of_last_transcription_change > 2:
             # If no speech was added for two seconds the sample is assumed to be finished.

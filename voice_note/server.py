@@ -7,7 +7,7 @@ import whisper
 from functools import partial
 from utils.sample import Sample
 
-MAXIMUM_PREDICTION_FREQ = 1.  # Predictions/Second
+MAXIMUM_PREDICTION_FREQ = 0.75  # Predictions/Second
 SAMPLE_OVERLAP = 0.5  # Final seconds of current sample to be used in the next sample to prevent losing speech segments
 
 
