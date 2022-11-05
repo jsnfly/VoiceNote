@@ -2,23 +2,30 @@ import socket
 import time
 import pyaudio
 import json
-
-HOST = '0.0.0.0'
-PORT = 12345
-
-audio_config = {
-    'format': pyaudio.paInt16,  # https://en.wikipedia.org/wiki/Audio_bit_depth
-    'channels': 1,
-    'rate': 44_100
-}
+import argparse
+from functools import lru_cache
 
 
-def connect(sock):
+@lru_cache(maxsize=1)
+def get_audio_config(input_device_index):
+    if input_device_index is None:
+        device_config = audio.get_default_input_device_info()
+    else:
+        device_config = audio.get_device_info_by_index(input_device_index)
+
+    return {
+        'format': pyaudio.paInt16,  # https://en.wikipedia.org/wiki/Audio_bit_depth,
+        'channels': 1,
+        'rate': int(device_config['defaultSampleRate'])
+    }
+
+
+def connect(sock, host, port, input_device_index):
     while True:
         try:
-            sock.connect((HOST, PORT))
+            sock.connect((host, port))
             print('Connected.')
-            sock.sendall(json.dumps(audio_config).encode())
+            sock.sendall(json.dumps(get_audio_config(input_device_index)).encode())
             data = sock.recv(64)
             assert data == b'OK'
             print('Initialized.')
@@ -28,9 +35,9 @@ def connect(sock):
             time.sleep(1.0)
 
 
-def main():
+def main(host, port, input_device_index):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        connect(sock)
+        connect(sock, host, port, input_device_index)
 
         def _callback(in_data, frame_count, time_info, status):
             message = pyaudio.paContinue
@@ -41,10 +48,10 @@ def main():
             return (in_data, message)
 
         stream = audio.open(
-            **audio_config,
+            **get_audio_config(input_device_index),
             input=True,
             frames_per_buffer=0,
-            input_device_index=None,
+            input_device_index=input_device_index,
             stream_callback=_callback
         )
 
@@ -58,5 +65,11 @@ def main():
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default='0.0.0.0')
+    parser.add_argument("--port", default=12345, type=int)
+    parser.add_argument("--input-device-index", type=int)
+
+    args = parser.parse_args()
     audio = pyaudio.PyAudio()
-    main()
+    main(args.host, args.port, args.input_device_index)
