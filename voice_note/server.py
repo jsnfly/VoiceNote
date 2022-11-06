@@ -6,9 +6,9 @@ import json
 import whisper
 from functools import partial
 from utils.sample import Sample
-
-MAXIMUM_PREDICTION_FREQ = 0.75  # Predictions/Second
-SAMPLE_OVERLAP = 0.5  # Final seconds of current sample to be used in the next sample to prevent losing speech segments
+from utils.pyaudio import audio
+from actions.replay import Replay
+from server_config import SAVE_DIR, SAMPLE_OVERLAP, MAXIMUM_PREDICTION_FREQ
 
 
 def predict(sample):
@@ -29,8 +29,9 @@ async def read(reader):
 
 def finish_sample(sample, audio_config, save_predictions=True):
     if not sample.is_empty:
+        Replay()(sample.result)
         if save_predictions:
-            sample.save('outputs', audio_config['channels'], audio.get_sample_size(audio_config['format']))
+            sample.save(SAVE_DIR, audio_config['channels'], audio.get_sample_size(audio_config['format']))
         print("\nFinished: ", sample.result.text)
     bytes_per_second = audio_config['rate'] * 2  # Times 2 because each data point has 16 bits.
     initial_fragment = b''.join(sample.fragments)[-int(SAMPLE_OVERLAP * bytes_per_second):]
@@ -69,7 +70,6 @@ if __name__ == '__main__':
     parser.add_argument("--lang")
     args = parser.parse_args()
 
-    audio = pyaudio.PyAudio()
     model = whisper.load_model('base', device='cuda')
     options = whisper.DecodingOptions(language=args.lang)
 
