@@ -11,10 +11,12 @@ from actions.replay import Replay
 from server_config import SAVE_DIR, SAMPLE_OVERLAP, MAXIMUM_PREDICTION_FREQ
 
 
-def predict(sample):
-    sample.transcribe(model, options)
-    if not sample.is_empty:
-        print(sample.result.text, end="\r")
+async def handle_connection(reader, writer, save_predictions):
+    audio_config = await initialize(reader, writer)
+    assert audio_config['format'] == pyaudio.paInt16
+
+    await prediction_loop(reader, writer, audio_config, save_predictions)
+    print('Connection closed.')
 
 
 async def initialize(reader, writer):
@@ -23,8 +25,27 @@ async def initialize(reader, writer):
     return audio_config
 
 
+async def prediction_loop(reader, writer, audio_config, save_predictions):
+    sample = Sample([], audio_config['rate'])
+    while not reader.at_eof():
+        start = time.time()
+        sample.append(await read(reader))
+        predict(sample)
+        if sample.is_finished or sample.is_empty:
+            sample = finish_sample(sample, audio_config, save_predictions)
+        end = time.time()
+        if (diff := 1 / MAXIMUM_PREDICTION_FREQ - (end - start)) > 0:
+            await asyncio.sleep(diff)
+
+
 async def read(reader):
     return await reader.read(2**42)  # Large number to read the whole buffer.
+
+
+def predict(sample):
+    sample.transcribe(model, options)
+    if not sample.is_empty:
+        print(sample.result.text, end="\r")
 
 
 def finish_sample(sample, audio_config, save_predictions=True):
@@ -38,27 +59,9 @@ def finish_sample(sample, audio_config, save_predictions=True):
     return Sample([initial_fragment], audio_config['rate'])
 
 
-async def handle_connection(reader, writer, save_predictions):
-    audio_config = await initialize(reader, writer)
-    assert audio_config['format'] == pyaudio.paInt16
-
-    sample = Sample([], audio_config['rate'])
-    while not reader.at_eof():
-        start = time.time()
-        sample.append(await read(reader))
-        predict(sample)
-        if sample.is_finished or sample.is_empty:
-            sample = finish_sample(sample, audio_config, save_predictions)
-        end = time.time()
-        if (diff := 1 / MAXIMUM_PREDICTION_FREQ - (end - start)) > 0:
-            await asyncio.sleep(diff)
-    print('Connection closed.')
-
-
 async def main(port, save_predictions):
     _handle_connection = partial(handle_connection, save_predictions=save_predictions)
     server = await asyncio.start_server(_handle_connection, '0.0.0.0', port)
-
     async with server:
         await server.serve_forever()
 
