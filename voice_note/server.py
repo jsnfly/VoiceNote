@@ -7,7 +7,7 @@ import whisper
 from functools import partial
 from utils.sample import Sample
 from utils.pyaudio import audio
-from actions.replay import Replay
+from actions.replay import load_last_wavefile, trigger_condition
 from server_config import SAVE_DIR, SAMPLE_OVERLAP, MAXIMUM_PREDICTION_FREQ
 
 
@@ -25,6 +25,10 @@ async def initialize(reader, writer):
     return audio_config
 
 
+async def read(reader):
+    return await reader.read(2**42)  # Large number to read the whole buffer.
+
+
 async def prediction_loop(reader, writer, audio_config, save_predictions):
     sample = Sample([], audio_config['rate'])
     while not reader.at_eof():
@@ -32,14 +36,10 @@ async def prediction_loop(reader, writer, audio_config, save_predictions):
         sample.append(await read(reader))
         predict(sample)
         if sample.is_finished or sample.is_empty:
-            sample = finish_sample(sample, audio_config, save_predictions)
+            sample = finish_sample(sample, audio_config, writer, save_predictions)
         end = time.time()
         if (diff := 1 / MAXIMUM_PREDICTION_FREQ - (end - start)) > 0:
             await asyncio.sleep(diff)
-
-
-async def read(reader):
-    return await reader.read(2**42)  # Large number to read the whole buffer.
 
 
 def predict(sample):
@@ -48,12 +48,19 @@ def predict(sample):
         print(sample.result.text, end="\r")
 
 
-def finish_sample(sample, audio_config, save_predictions=True):
+def finish_sample(sample, audio_config, writer, save_predictions=True):
     if not sample.is_empty:
-        Replay()(sample.result)
+
+        # TODO: refactor
+        result = {'text': sample.result.text}
+        if trigger_condition(sample.result):
+            result['audio'] = load_last_wavefile()
+
+        writer.write(json.dumps(result).encode())
         if save_predictions:
             sample.save(SAVE_DIR, audio_config['channels'], audio.get_sample_size(audio_config['format']))
         print("\nFinished: ", sample.result.text)
+
     bytes_per_second = audio_config['rate'] * 2  # Times 2 because each data point has 16 bits.
     initial_fragment = b''.join(sample.fragments)[-int(SAMPLE_OVERLAP * bytes_per_second):]
     return Sample([initial_fragment], audio_config['rate'])

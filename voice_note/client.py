@@ -35,14 +35,39 @@ def connect(sock, host, port, input_device_index):
             time.sleep(1.0)
 
 
+def receive(sock):
+    try:  # TODO: use asyncio here too? Or get rid of it in server.py?
+        result = b''
+        while True:
+            try:
+                result += sock.recv(2**20)
+                result = json.loads(result.decode())
+                break
+            except json.decoder.JSONDecodeError:
+                pass
+        return result
+    except BlockingIOError:
+        pass
+
 def main(host, port, input_device_index):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         connect(sock, host, port, input_device_index)
+        sock.setblocking(0)
 
         def _callback(in_data, frame_count, time_info, status):
             message = pyaudio.paContinue
             try:
                 sock.sendall(in_data)
+                result = receive(sock)
+                if result is not None:
+                    print(result['text'])
+                    if 'audio' in result:
+                        audio_res = result['audio']
+                        out_stream = audio.open(format=audio.get_format_from_width(audio_res['width']),
+                                                channels=audio_res['channels'], rate=audio_res['rate'], output=True)
+                        # TODO: get rid of eval
+                        # TODO: gets picked up by microphone.
+                        out_stream.write(eval(audio_res['frames']))
             except BrokenPipeError:
                 message = pyaudio.paComplete
             return (in_data, message)
