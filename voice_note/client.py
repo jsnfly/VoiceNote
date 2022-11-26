@@ -4,6 +4,7 @@ import pyaudio
 import json
 import argparse
 from functools import lru_cache
+from message import send_message, recv_message
 
 
 @lru_cache(maxsize=1)
@@ -24,10 +25,10 @@ def connect(sock, host, port, input_device_index):
     while True:
         try:
             sock.connect((host, port))
+            sock.setblocking(0)
             print('Connected.')
-            sock.sendall(json.dumps(get_audio_config(input_device_index)).encode())
-            data = sock.recv(64)
-            assert data == b'OK'
+            send_message(get_audio_config(input_device_index), sock)
+            assert recv_message(sock)[0]['response'] == 'OK'
             print('Initialized.')
             break
         except ConnectionRefusedError:
@@ -52,7 +53,6 @@ def receive(sock):
 def main(host, port, input_device_index):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         connect(sock, host, port, input_device_index)
-        sock.setblocking(0)
 
         def _callback(in_data, frame_count, time_info, status):
             message = pyaudio.paContinue
