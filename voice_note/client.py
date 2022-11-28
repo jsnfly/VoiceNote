@@ -4,7 +4,7 @@ import pyaudio
 import json
 import argparse
 from functools import lru_cache
-from message import send_message, recv_message
+from message import send_message, recv_messages
 
 
 @lru_cache(maxsize=1)
@@ -28,7 +28,8 @@ def connect(sock, host, port, input_device_index):
             sock.setblocking(0)
             print('Connected.')
             send_message(get_audio_config(input_device_index), sock)
-            assert recv_message(sock)[0]['response'] == 'OK'
+            messages, _ = recv_messages(sock)
+            assert messages[0]['response'] == 'OK'
             print('Initialized.')
             break
         except ConnectionRefusedError:
@@ -37,7 +38,7 @@ def connect(sock, host, port, input_device_index):
 
 
 def receive(sock):
-    try:  # TODO: use asyncio here too? Or get rid of it in server.py?
+    try:
         result = b''
         while True:
             try:

@@ -46,38 +46,26 @@ class Message:
 def send_message(data, socket):
     socket.sendall(Message(data).encode())
 
-# TODO: refactor
-def recv_message(socket):
+
+def _ends_with_incomplete_separator(bytes_):
+    if bytes_.endswith(Message.SEP):
+        return False
+    return bytes_.endswith(tuple(bytes([i]) for i in Message.SEP))
+
+
+def recv_messages(socket):
     assert not socket.getblocking(), "Only non-blocking sockets are supported."
 
-    msg_bytes, other_bytes = [], []
-    msg_has_started = False
+    bytes_ = b''
     while True:
         try:
-            bytes_ = socket.recv(2**20)
+            bytes_ += socket.recv(2**20)  # May be slow because bytes are immutable, but should not matter.
         except BlockingIOError:
             continue
-        sep_count = bytes_.count(Message.SEP)
-        if sep_count == 1:
-            if msg_has_started:
-                msg_b, other_b = bytes_.split(Message.SEP)
-                msg_bytes.append(msg_b)
-                other_bytes.append(other_b)
-                msg = Message.decode(b''.join(msg_bytes))
-                return msg, b''.join(other_bytes)
-            else:
-                msg_has_started = True
-                other_b, msg_b = bytes_.split(Message.SEP)
-                msg_bytes.append(msg_b)
-                other_bytes.append(other_b)
-        elif sep_count == 2:
-            other1, msg, other2 = bytes_.split(Message.SEP)
-            assert len(other1) == len(other2) == 0
-            return Message.decode(msg), b''
-        elif sep_count == 0:
-            if msg_has_started:
-                msg_bytes.append(bytes_)
-            else:
-                return None, bytes_
-        else:
-            raise Exception('More than one Message in buffer is currently not supported')
+        splits = bytes_.split(Message.SEP)
+        if not (len(splits) % 2 == 0 or _ends_with_incomplete_separator(bytes_)):
+            break
+    messages = [splits[i] for i in range(1, len(splits) - 1) if splits[i-1] == splits[i+1] == b'']
+    other = [sp for sp in splits if len(sp) > 0 and sp not in messages]
+
+    return [Message.decode(msg) for msg in messages], b''.join(other)

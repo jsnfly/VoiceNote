@@ -5,7 +5,7 @@ import json
 import whisper
 from socket import create_server
 from time import sleep
-from message import recv_message, send_message
+from message import recv_messages, send_message
 from utils.sample import Sample
 from utils.pyaudio import audio
 from actions.replay import load_last_wavefile, trigger_condition
@@ -13,8 +13,8 @@ from server_config import SAVE_DIR, SAMPLE_OVERLAP, MAXIMUM_PREDICTION_FREQ
 
 
 def initialize(sock):
-    audio_config, other = recv_message(sock)
-    assert len(other) == 0
+    messages, _ = recv_messages(sock)
+    audio_config = messages[0]
     send_message({'response': 'OK'}, sock)
     return audio_config
 
@@ -23,8 +23,8 @@ def prediction_loop(sock, audio_config, save_predictions):
     sample = Sample([], audio_config['rate'])
     while True:
         start = time.time()
-        msg, bytes_ = recv_message(sock)
-        assert msg is None, "Currently no messages should come from client"
+        messages, bytes_ = recv_messages(sock)
+        assert len(messages) == 0, "Currently no messages should come from client"
         sample.append(bytes_)
         predict(sample)
         if sample.is_finished or sample.is_empty:
