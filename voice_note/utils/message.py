@@ -3,7 +3,7 @@ import json
 
 # TODO: Type hints would make this easier to understand.
 class Message:
-    SEP = "\n\n\n".encode()
+    SEP = "\n\n\n\n\n\n\n\n\n".encode()  # Can't be too short or else it will appear by chance.
 
     def __init__(self, data):
         self.data = data
@@ -39,7 +39,7 @@ class Message:
             if isinstance(val, dict):
                 cls._apply_recursively_to_type(func, target_type, val)
             elif isinstance(val, target_type):
-                dict_node[key] == func(val)
+                dict_node[key] = func(val)
         return dict_node
 
 

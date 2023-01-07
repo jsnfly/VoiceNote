@@ -1,14 +1,11 @@
 import argparse
 import pyaudio
 import time
-import json
 import whisper
 from socket import create_server
 from time import sleep
-from message import recv_messages, send_message
-from utils.sample import Sample
-from utils.pyaudio import audio
-from actions.replay import load_last_wavefile, trigger_condition
+from utils import audio, Sample, recv_messages, send_message
+from actions.replay import Replay
 from server_config import SAVE_DIR, SAMPLE_OVERLAP, MAXIMUM_PREDICTION_FREQ
 
 
@@ -16,19 +13,22 @@ def initialize(sock):
     messages, _ = recv_messages(sock)
     audio_config = messages[0]
     send_message({'response': 'OK'}, sock)
-    return audio_config
+
+    actions = [Replay(SAVE_DIR)]
+    return audio_config, actions
 
 
-def prediction_loop(sock, audio_config, save_predictions):
+def prediction_loop(sock, audio_config, actions, save_predictions):
     sample = Sample([], audio_config['rate'])
     while True:
         start = time.time()
         messages, bytes_ = recv_messages(sock)
         assert len(messages) == 0, "Currently no messages should come from client"
         sample.append(bytes_)
+
         predict(sample)
         if sample.is_finished or sample.is_empty:
-            sample = finish_sample(sample, audio_config, sock, save_predictions)
+            sample = finish_sample(sample, audio_config, sock, actions, save_predictions)
         end = time.time()
         if (diff := 1 / MAXIMUM_PREDICTION_FREQ - (end - start)) > 0:
             sleep(diff)
@@ -40,14 +40,12 @@ def predict(sample):
         print(sample.result.text, end="\r")
 
 
-def finish_sample(sample, audio_config, sock, save_predictions=True):
+def finish_sample(sample, audio_config, sock, actions, save_predictions=True):
     if not sample.is_empty:
+        response = apply_actions(actions, sample)
+        response['text'] = sample.result.text
+        send_message(response, sock)
 
-        # TODO: refactor
-        result = {'text': sample.result.text}
-        if trigger_condition(sample.result):
-            result['audio'] = load_last_wavefile()
-        send_message(result, sock)
         if save_predictions:
             sample.save(SAVE_DIR, audio_config['channels'], audio.get_sample_size(audio_config['format']))
         print("\nFinished: ", sample.result.text)
@@ -57,15 +55,22 @@ def finish_sample(sample, audio_config, sock, save_predictions=True):
     return Sample([initial_fragment], audio_config['rate'])
 
 
+def apply_actions(actions, sample):
+    response = {}
+    for action in actions:
+        response = action(sample.result, response)
+    return response
+
+
 def main(port, save_predictions):
     with create_server(('0.0.0.0', port)) as sock:
         conn_sock, conn_addr = sock.accept()
         with conn_sock:
             print(f"Connected by {conn_addr}")
             conn_sock.setblocking(0)
-            audio_config = initialize(conn_sock)
+            audio_config, actions = initialize(conn_sock)
             assert audio_config['format'] == pyaudio.paInt16
-            prediction_loop(conn_sock, audio_config, save_predictions)
+            prediction_loop(conn_sock, audio_config, actions, save_predictions)
 
 
 if __name__ == '__main__':

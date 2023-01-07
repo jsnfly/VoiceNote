@@ -4,7 +4,7 @@ import pyaudio
 import json
 import argparse
 from functools import lru_cache
-from message import send_message, recv_messages
+from utils import recv_messages, send_message
 
 
 @lru_cache(maxsize=1)
@@ -50,6 +50,7 @@ def receive(sock):
         return result
     except BlockingIOError:
         pass
+
 
 def main(host, port, input_device_index):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
