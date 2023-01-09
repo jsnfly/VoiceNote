@@ -41,16 +41,18 @@ def predict(sample):
 
 
 def finish_sample(sample, audio_config, sock, actions, save_predictions=True):
+    sample_size = audio.get_sample_size(audio_config['format'])
+
     if not sample.is_empty:
         response = apply_actions(actions, sample)
         response['text'] = sample.result.text
         send_message(response, sock)
 
         if save_predictions:
-            sample.save(SAVE_DIR, audio_config['channels'], audio.get_sample_size(audio_config['format']))
+            sample.save(SAVE_DIR, audio_config['channels'], sample_size)
         print("\nFinished: ", sample.result.text)
 
-    bytes_per_second = audio_config['rate'] * 2  # Times 2 because each data point has 16 bits.
+    bytes_per_second = audio_config['rate'] * sample_size
     initial_fragment = b''.join(sample.fragments)[-int(SAMPLE_OVERLAP * bytes_per_second):]
     return Sample([initial_fragment], audio_config['rate'])
 
@@ -69,7 +71,6 @@ def main(port, save_predictions):
             print(f"Connected by {conn_addr}")
             conn_sock.setblocking(0)
             audio_config, actions = initialize(conn_sock)
-            assert audio_config['format'] == pyaudio.paInt16
             prediction_loop(conn_sock, audio_config, actions, save_predictions)
 
 
