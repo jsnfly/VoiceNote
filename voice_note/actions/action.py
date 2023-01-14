@@ -6,6 +6,7 @@ class Action(ABC):
             result = self.run(decoding_result)
             if result is not None:
                 response.update(result)
+            response['skip_saving'] = True
         return response
 
     @abstractmethod

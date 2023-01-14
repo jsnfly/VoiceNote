@@ -4,7 +4,8 @@ import whisper
 from socket import create_server
 from time import sleep
 from utils import audio, Sample, recv_messages, send_message
-from actions.replay import Replay
+from utils.misc import round_to_nearest_appropriate_number
+from actions import Delete, Replay
 from server_config import SAVE_DIR, SAMPLE_OVERLAP, MAXIMUM_PREDICTION_FREQ
 
 
@@ -13,7 +14,7 @@ def initialize(sock):
     audio_config = messages[0]
     send_message({'response': 'OK'}, sock)
 
-    actions = [Replay(SAVE_DIR)]
+    actions = [Delete(SAVE_DIR), Replay(SAVE_DIR)]
     return audio_config, actions
 
 
@@ -50,12 +51,13 @@ def finish_sample(sample, audio_config, sock, actions, save_predictions=True):
         response['text'] = sample.result.text
         send_message(response, sock)
 
-        if save_predictions:
+        if save_predictions and not response.get('skip_saving', False):
             sample.save(SAVE_DIR, audio_config['channels'], sample_size)
         print("\nFinished: ", sample.result.text)
 
     bytes_per_second = audio_config['rate'] * sample_size
-    initial_fragment = b''.join(sample.fragments)[-int(SAMPLE_OVERLAP * bytes_per_second):]
+    overlap_bytes = round_to_nearest_appropriate_number(SAMPLE_OVERLAP * bytes_per_second, sample_size)
+    initial_fragment = b''.join(sample.fragments)[-overlap_bytes:]
     return Sample([initial_fragment], audio_config['rate'])
 
 
