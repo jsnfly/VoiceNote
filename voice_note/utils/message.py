@@ -1,4 +1,5 @@
 import ast
+import time
 import json
 
 # TODO: Type hints would make this easier to understand.
@@ -7,6 +8,9 @@ class Message:
 
     def __init__(self, data):
         self.data = data
+
+    def __contains__(self, key):
+        return self.data.__contains__(key)
 
     def __getitem__(self, key):
         return self.data[key]
@@ -28,7 +32,7 @@ class Message:
         def _func(val):
             try:
                 return ast.literal_eval(val)
-            except ValueError:
+            except (ValueError, SyntaxError):
                 return val
 
         return cls._apply_recursively_to_type(_func, str, data.copy())
@@ -44,7 +48,13 @@ class Message:
 
 
 def send_message(data, socket):
-    socket.sendall(Message(data).encode())
+    while True:
+        try:
+            socket.sendall(Message(data).encode())
+            break
+        except BlockingIOError:
+            time.sleep(0.01)
+            continue
 
 
 def _ends_with_incomplete_separator(bytes_):
@@ -53,7 +63,7 @@ def _ends_with_incomplete_separator(bytes_):
     return bytes_.endswith(tuple(bytes([i]) for i in Message.SEP))
 
 
-def recv_messages(socket):
+def recv_messages(socket, blocking=True):
     assert not socket.getblocking(), "Only non-blocking sockets are supported."
 
     bytes_ = b''
@@ -61,7 +71,10 @@ def recv_messages(socket):
         try:
             bytes_ += socket.recv(2**20)  # May be slow because bytes are immutable, but should not matter.
         except BlockingIOError:
-            continue
+            if blocking:
+                continue
+            else:
+                return [], bytes_
         splits = bytes_.split(Message.SEP)
         if not (len(splits) % 2 == 0 or _ends_with_incomplete_separator(bytes_)):
             break

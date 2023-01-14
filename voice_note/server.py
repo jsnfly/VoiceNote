@@ -1,5 +1,4 @@
 import argparse
-import pyaudio
 import time
 import whisper
 from socket import create_server

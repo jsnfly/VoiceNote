@@ -1,10 +1,10 @@
+import pyaudio
 import socket
 import time
-import pyaudio
-import json
 import argparse
 from functools import lru_cache
-from utils import recv_messages, send_message
+from utils import audio, recv_messages, send_message
+from client_config import AUDIO_FORMAT, NUM_CHANNELS
 
 
 @lru_cache(maxsize=1)
@@ -15,8 +15,8 @@ def get_audio_config(input_device_index):
         device_config = audio.get_device_info_by_index(input_device_index)
 
     return {
-        'format': pyaudio.paInt16,  # https://en.wikipedia.org/wiki/Audio_bit_depth,
-        'channels': 1,
+        'format': AUDIO_FORMAT,
+        'channels': NUM_CHANNELS,
         'rate': int(device_config['defaultSampleRate'])
     }
 
@@ -37,47 +37,32 @@ def connect(sock, host, port, input_device_index):
             time.sleep(1.0)
 
 
-def receive(sock):
-    try:
-        result = b''
-        while True:
-            try:
-                result += sock.recv(2**20)
-                result = json.loads(result.decode())
-                break
-            except json.decoder.JSONDecodeError:
-                pass
-        return result
-    except BlockingIOError:
-        pass
-
-
 def main(host, port, input_device_index):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         connect(sock, host, port, input_device_index)
 
         def _callback(in_data, frame_count, time_info, status):
-            message = pyaudio.paContinue
             try:
                 sock.sendall(in_data)
-                result = receive(sock)
-                if result is not None:
-                    print(result['text'])
-                    if 'audio' in result:
-                        audio_res = result['audio']
-                        out_stream = audio.open(format=audio.get_format_from_width(audio_res['width']),
-                                                channels=audio_res['channels'], rate=audio_res['rate'], output=True)
-                        # TODO: get rid of eval
+                messages, _ = recv_messages(sock, blocking=False)
+                for msg in messages:
+                    if 'text' in msg:
+                        print(msg['text'])
+                    if 'audio' in msg:
+                        msg_audio = msg['audio']
+                        out_stream = audio.open(format=audio.get_format_from_width(msg_audio['width']),
+                                                channels=msg_audio['channels'], rate=msg_audio['rate'], output=True)
                         # TODO: gets picked up by microphone.
-                        out_stream.write(eval(audio_res['frames']))
+                        out_stream.write(msg_audio['frames'])
+                        out_stream.close()
+                return _, pyaudio.paContinue
             except BrokenPipeError:
-                message = pyaudio.paComplete
-            return (in_data, message)
+                return _, pyaudio.paComplete
 
         stream = audio.open(
             **get_audio_config(input_device_index),
             input=True,
-            frames_per_buffer=0,
+            frames_per_buffer=pyaudio.paFramesPerBufferUnspecified,
             input_device_index=input_device_index,
             stream_callback=_callback
         )
@@ -98,5 +83,4 @@ if __name__ == '__main__':
     parser.add_argument("--input-device-index", type=int)
 
     args = parser.parse_args()
-    audio = pyaudio.PyAudio()
     main(args.host, args.port, args.input_device_index)
