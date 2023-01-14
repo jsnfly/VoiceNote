@@ -23,6 +23,9 @@ def prediction_loop(sock, audio_config, actions, save_predictions):
         start = time.time()
         messages, bytes_ = recv_messages(sock)
         assert len(messages) == 0, "Currently no messages should come from client"
+        if len(bytes_) == 0:
+            break
+
         sample.append(bytes_)
 
         predict(sample)
@@ -65,12 +68,13 @@ def apply_actions(actions, sample):
 
 def main(port, save_predictions):
     with create_server(('0.0.0.0', port)) as sock:
-        conn_sock, conn_addr = sock.accept()
-        with conn_sock:
-            print(f"Connected by {conn_addr}")
-            conn_sock.setblocking(0)
-            audio_config, actions = initialize(conn_sock)
-            prediction_loop(conn_sock, audio_config, actions, save_predictions)
+        while True:
+            conn_sock, conn_addr = sock.accept()
+            with conn_sock:
+                print(f"Connected by {conn_addr}")
+                conn_sock.setblocking(0)
+                audio_config, actions = initialize(conn_sock)
+                prediction_loop(conn_sock, audio_config, actions, save_predictions)
 
 
 if __name__ == '__main__':
