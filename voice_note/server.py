@@ -28,8 +28,8 @@ def prediction_loop(sock, audio_config, actions, save_predictions):
             break
 
         sample.append(bytes_)
-
         predict(sample)
+
         if sample.is_finished or sample.is_empty:
             sample = finish_sample(sample, audio_config, sock, actions, save_predictions)
         end = time.time()
@@ -86,7 +86,7 @@ if __name__ == '__main__':
     parser.add_argument("--lang")
     args = parser.parse_args()
 
-    model = whisper.load_model('base', device='cuda')
+    model = whisper.load_model('medium', device='cuda')
     options = whisper.DecodingOptions(language=args.lang)
 
     main(args.port, not args.no_saving)

@@ -47,14 +47,19 @@ class Message:
         return dict_node
 
 
+# TODO: own Socket class?
 def send_message(data, socket):
-    while True:
+    send_data(Message(data).encode(), socket)
+
+# TODO: always send messages (get rid of `send_data``)?
+def send_data(data, socket):
+    bytes_sent = 0
+    while bytes_sent < len(data):
         try:
-            socket.sendall(Message(data).encode())
-            break
+            bytes_sent += socket.send(data[bytes_sent:])
         except BlockingIOError:
-            time.sleep(0.01)
-            continue
+            # Send buffer is full, wait a bit and try again.
+            time.sleep(0.02)
 
 
 def _ends_with_incomplete_separator(bytes_):
@@ -64,14 +69,23 @@ def _ends_with_incomplete_separator(bytes_):
 
 
 def recv_messages(socket, blocking=True):
+
+    # Socket is supposed to be non-blocking, because otherwise `socket.recv` will block until it receives at least one
+    # byte.
+    # Good resource: https://docs.python.org/3/howto/sockets.html#socket-howto
     assert not socket.getblocking(), "Only non-blocking sockets are supported."
 
     bytes_ = b''
     while True:
         try:
-            bytes_ += socket.recv(2**20)  # May be slow because bytes are immutable, but should not matter.
+            received = socket.recv(4096)
+            bytes_ += received  # May be slow because bytes are immutable, but should not matter.
+            if len(received) == 4096:
+                continue
         except BlockingIOError:
+            # Nothing to receive.
             if blocking:
+                time.sleep(0.02)
                 continue
             else:
                 return [], bytes_

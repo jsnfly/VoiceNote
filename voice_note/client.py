@@ -3,7 +3,7 @@ import socket
 import time
 import argparse
 from functools import lru_cache
-from utils import audio, recv_messages, send_message
+from utils import audio, recv_messages, send_message, send_data
 from client_config import AUDIO_FORMAT, NUM_CHANNELS
 
 
@@ -43,7 +43,7 @@ def main(host, port, input_device_index):
 
         def _callback(in_data, frame_count, time_info, status):
             try:
-                sock.sendall(in_data)
+                send_data(in_data, sock)
                 messages, _ = recv_messages(sock, blocking=False)
                 for msg in messages:
                     if 'text' in msg:
