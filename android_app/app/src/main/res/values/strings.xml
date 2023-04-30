@@ -1,5 +1,4 @@
 <resources>
     <string name="app_name">VoiceNoteClient</string>
-    <string name="start_streaming">Start</string>
-    <string name="stop_streaming">Stop</string>
+    <string name="start_streaming">RECORD</string>
 </resources>
