@@ -62,17 +62,18 @@ def _callback(sock, in_data, *args):
         if BYTES_LOG_FILE is not None:
             with open(BYTES_LOG_FILE, 'a') as f:
                 log_bytes(in_data, f)
-        messages, _ = recv_messages(sock, blocking=False)
-        for msg in messages:
-            if 'text' in msg:
-                print(msg['text'])
-            if 'audio' in msg:
-                msg_audio = msg['audio']
-                out_stream = audio.open(format=audio.get_format_from_width(msg_audio['width']),
-                                        channels=msg_audio['channels'], rate=msg_audio['rate'], output=True)
-                # TODO: gets picked up by microphone.
-                out_stream.write(msg_audio['frames'])
-                out_stream.close()
+        _ = None
+        # messages, _ = recv_messages(sock, blocking=False)
+        # for msg in messages:
+        #     if 'text' in msg:
+        #         print(msg['text'])
+        #     if 'audio' in msg:
+        #         msg_audio = msg['audio']
+        #         out_stream = audio.open(format=audio.get_format_from_width(msg_audio['width']),
+        #                                 channels=msg_audio['channels'], rate=msg_audio['rate'], output=True)
+        #         # TODO: gets picked up by microphone.
+        #         out_stream.write(msg_audio['frames'])
+        #         out_stream.close()
         return _, pyaudio.paContinue
     except BrokenPipeError:
         return _, pyaudio.paComplete

@@ -1,5 +1,6 @@
 import time
 import whisper
+import asyncio
 import multiprocessing
 from socket import create_server
 from time import sleep
@@ -28,18 +29,14 @@ def prediction_loop(audio_config, pipe):
     while True:
         start = time.time()
         try:
-            # TODO: own method?
-            bytes_ = pipe.recv()
-            print(f"Received {len(bytes_)} bytes.")
-            sample.append(bytes_)
-            while len(bytes_) > 1024:
-                print(f"Received {len(bytes_)} bytes.")
-                sample.append(bytes_)
+            while pipe.poll():
                 bytes_ = pipe.recv()
+                sample.append(bytes_)
         except EOFError:
             print("Connection closed.")
             pipe.close()
         finally:
+            print('predicting...')
             predict(sample, model, options)
             if sample.is_finished or sample.is_empty:
                 sample = finish_sample(sample, audio_config, None)
@@ -49,16 +46,42 @@ def prediction_loop(audio_config, pipe):
 
 
 def receive_loop(sock, pipe):
-    while True:
-        messages, bytes_ = recv_messages(sock)  # TODO: Probably await in this method somewhere.
-        if BYTES_LOG_FILE is not None:
-            with open(BYTES_LOG_FILE, 'a') as f:
-                log_bytes(bytes_, f)
-        assert len(messages) == 0, "Currently no messages should come from client"
-        print(f"Sending {len(bytes_)} bytes.")
-        pipe.send(bytes_)  # TODO: await here (blocks if pipe is full)
-        if len(bytes_) == 0:
-            break
+    async def _recv(queue):
+        while True:
+            messages, bytes_ = recv_messages(sock)
+            assert len(messages) == 0, "Currently no messages should come from client"
+            if len(bytes_) == 0:
+                break
+            await queue.put(bytes_)
+            await asyncio.sleep(0.01)
+
+    async def _send(queue):
+        MAXIMUM_SEND_FREQ = 10  # TODO: move to config or something
+        while True:
+            start = time.time()
+            n_elements = queue.qsize()
+            if n_elements == 0:  # TODO: will hang if queue remains empty
+                await asyncio.sleep(0.01)
+                continue
+            bytes_ = b''.join([await queue.get() for _ in range(n_elements)])
+            if len(bytes_) == 0:
+                break
+            await asyncio.to_thread(pipe.send, bytes_)
+
+            if BYTES_LOG_FILE is not None:
+                with open(BYTES_LOG_FILE, 'a') as f:
+                    log_bytes(bytes_, f)
+
+            end = time.time()
+            if (diff := 1 / MAXIMUM_SEND_FREQ - (end - start)) > 0:
+                await asyncio.sleep(diff)
+
+    async def _loop():
+        queue = asyncio.Queue()
+        tasks = [_recv(queue), _send(queue)]
+        await asyncio.gather(*tasks)
+
+    asyncio.run(_loop())
     pipe.close()
 
 
@@ -72,7 +95,7 @@ def finish_sample(sample, audio_config, sock):
     sample_size = audio.get_sample_size(audio_config['format'])
 
     if not sample.is_empty:
-        response = {'text': sample.result.text}
+        # response = {'text': sample.result.text}
         # send_message(response, sock)
 
         sample.save(SAVE_DIR, audio_config['channels'], sample_size)
@@ -95,6 +118,8 @@ def main():
 
                 pipe_in, pipe_out = multiprocessing.Pipe()
                 receive_process = multiprocessing.Process(target=receive_loop, args=(conn_sock, pipe_out))
+
+                # TODO: start prediction process before connection is established
                 prediction_process = multiprocessing.Process(target=prediction_loop, args=(audio_config, pipe_in))
 
                 receive_process.start()
