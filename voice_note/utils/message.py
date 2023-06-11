@@ -73,14 +73,15 @@ def recv_messages(socket, blocking=True):
     # Socket is supposed to be non-blocking, because otherwise `socket.recv` will block until it receives at least one
     # byte.
     # Good resource: https://docs.python.org/3/howto/sockets.html#socket-howto
-    assert not socket.getblocking(), "Only non-blocking sockets are supported."
+    socket.setblocking(0)
+    assert not socket.getblocking(), "Only non-blocking sockets are supported." # TODO: is this necessary?
 
     bytes_ = b''
     while True:
         try:
             received = socket.recv(4096)
             bytes_ += received  # May be slow because bytes are immutable, but should not matter.
-            if len(received) == 4096:
+            if len(received) == 4096:  # TODO: if len(received) == 0:  # Connection closed?
                 continue
         except BlockingIOError:
             # Nothing to receive.

@@ -6,6 +6,9 @@ from pathlib import Path
 from torchaudio.transforms import Resample
 from whisper.decoding import DecodingTask
 
+torch.set_num_threads(1)
+
+
 class Sample:
 
     def __init__(self, fragments, rate):
@@ -61,7 +64,6 @@ class Sample:
             f.write(self.result.text)
         self.to_wav_file(str(save_path / 'sample.wav'), channels, sample_size)
 
-
     def to_wav_file(self, file_path, channels, sample_size):
         wf = wave.open(file_path, 'wb')
         wf.setnchannels(channels)
@@ -76,7 +78,6 @@ class Sample:
         num_speech_bytes = min(len(data), int(speech_duration * self.resampler.orig_freq * sample_size))
         wf.writeframes(data[:num_speech_bytes])
         wf.close()
-
 
     @property
     def last_token(self):
