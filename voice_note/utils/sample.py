@@ -39,6 +39,9 @@ class Sample:
             self._is_finished = True
         self.result = result
 
+    def __len__(self):
+        return len(b''.join(self.fragments))
+
     @property
     def mel_spectrogram(self):
         data = torch.frombuffer(b''.join(self.fragments), dtype=torch.int16).float()

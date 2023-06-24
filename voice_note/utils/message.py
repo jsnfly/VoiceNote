@@ -73,7 +73,6 @@ def recv_messages(socket, blocking=True):
     # Socket is supposed to be non-blocking, because otherwise `socket.recv` will block until it receives at least one
     # byte.
     # Good resource: https://docs.python.org/3/howto/sockets.html#socket-howto
-    socket.setblocking(0)
     assert not socket.getblocking(), "Only non-blocking sockets are supported." # TODO: is this necessary?
 
     bytes_ = b''
