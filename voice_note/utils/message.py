@@ -51,7 +51,7 @@ class Message:
 def send_message(data, socket):
     send_data(Message(data).encode(), socket)
 
-# TODO: always send messages (get rid of `send_data``)?
+
 def send_data(data, socket):
     bytes_sent = 0
     while bytes_sent < len(data):
@@ -73,7 +73,7 @@ def recv_messages(socket, blocking=True):
     # Socket is supposed to be non-blocking, because otherwise `socket.recv` will block until it receives at least one
     # byte.
     # Good resource: https://docs.python.org/3/howto/sockets.html#socket-howto
-    assert not socket.getblocking(), "Only non-blocking sockets are supported." # TODO: is this necessary?
+    assert not socket.getblocking(), "Only non-blocking sockets are supported."
 
     bytes_ = b''
     while True:

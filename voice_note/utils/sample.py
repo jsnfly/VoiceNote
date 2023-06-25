@@ -46,7 +46,7 @@ class Sample:
 
     @property
     def last_token(self):
-        return (None if self.result is None else self.result.tokens[-1])
+        return None if self.result is None else self.result.tokens[-1]
 
     def __len__(self):
         return len(b''.join(self.fragments))
@@ -65,6 +65,7 @@ class Sample:
 
     @property
     def is_empty(self):
+        # TODO: 0.7 seems to low, but higher also gives False negatives
         return self.result is not None and self.result.no_speech_prob > 0.7
 
     def save(self, save_dir):
