@@ -1,5 +1,6 @@
 import time
 import whisper
+from dataclasses import dataclass, field
 from threading import Thread
 from queue import Queue
 from socket import create_server
@@ -14,9 +15,25 @@ BYTES_LOG_FILE = 'logs/server_bytes.log'
 
 def initialize(sock):
     messages, _ = recv_messages(sock)
-    audio_config = messages[0]
-    send_message({'response': 'OK'}, sock)
+    audio_config = _parse_audio_config(messages[0])
     return audio_config
+
+
+def _parse_audio_config(audio_config):
+
+    @dataclass
+    class AudioConfig:
+        format: int
+        channels: int
+        rate: int
+        sample_size: int = field(init=False)
+        bytes_per_second: int = field(init=False)
+
+        def __post_init__(self):
+            self.sample_size = audio.get_sample_size(self.format)
+            self.bytes_per_second = self.rate * self.sample_size
+
+    return AudioConfig(**audio_config.data)
 
 
 def communication_loop(queue, sock):
@@ -30,16 +47,14 @@ def communication_loop(queue, sock):
 
 
 def prediction_loop(queue, audio_config, model, options):
-    sample = Sample([], audio_config['rate'])
+    sample = Sample([], audio_config.rate, audio_config.channels, audio_config.sample_size)
     while True:
         start = time.time()
         bytes_ = b''.join([queue.get() for _ in range(queue.qsize())])
         sample.append(bytes_)
-        if len(sample) == 0:
-            continue
         sample.transcribe(model, options)
 
-        if sample.is_finished or sample.is_empty:
+        if sample.finished or sample.is_empty:
             sample, response = _finish_sample(sample, audio_config)
             # TODO: send response
             end = time.time()
@@ -48,20 +63,18 @@ def prediction_loop(queue, audio_config, model, options):
 
 
 def _finish_sample(sample, audio_config):
-    sample_size = audio.get_sample_size(audio_config['format'])
-
     if not sample.is_empty:
         response = {'text': sample.result.text}
 
-        sample.save(SAVE_DIR, audio_config['channels'], sample_size)
+        sample.save(SAVE_DIR)
         print("\nFinished: ", sample.result.text)
     else:
         response = {'text': ''}
 
-    bytes_per_second = audio_config['rate'] * sample_size
-    overlap_bytes = round_to_nearest_appropriate_number(SAMPLE_OVERLAP * bytes_per_second, sample_size)
+    overlap_bytes = round_to_nearest_appropriate_number(SAMPLE_OVERLAP * audio_config.bytes_per_second,
+                                                        audio_config.sample_size)
     initial_fragment = b''.join(sample.fragments)[-overlap_bytes:]
-    sample = Sample([initial_fragment], audio_config['rate'])
+    sample = Sample([initial_fragment], audio_config.rate, audio_config.channels, audio_config.sample_size)
 
     return sample, response
 
@@ -83,6 +96,8 @@ if __name__ == '__main__':
 
             communication_thread = Thread(target=communication_loop, args=(queue, conn_sock))
             communication_thread.start()
+
+            send_message({'response': 'OK'}, conn_sock)
 
             prediction_thread.join()
             communication_thread.join()
