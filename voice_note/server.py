@@ -1,10 +1,11 @@
 import time
 import whisper
-from dataclasses import dataclass, field
 from threading import Thread
 from queue import Queue
 from socket import create_server
-from utils import audio, Sample, recv_messages, send_message
+from utils.audio import AudioConfig
+from utils.sample import Sample
+from utils.message import recv_messages, send_message
 from utils.misc import round_to_nearest_appropriate_number, prepare_log_file, log_bytes
 from server_config import SAVE_DIR, SAMPLE_OVERLAP, MAXIMUM_PREDICTION_FREQ
 
@@ -15,25 +16,7 @@ BYTES_LOG_FILE = 'logs/server_bytes.log'
 
 def initialize(sock):
     messages, _ = recv_messages(sock)
-    audio_config = _parse_audio_config(messages[0])
-    return audio_config
-
-
-def _parse_audio_config(audio_config):
-
-    @dataclass
-    class AudioConfig:
-        format: int
-        channels: int
-        rate: int
-        sample_size: int = field(init=False)
-        bytes_per_second: int = field(init=False)
-
-        def __post_init__(self):
-            self.sample_size = audio.get_sample_size(self.format)
-            self.bytes_per_second = self.rate * self.sample_size
-
-    return AudioConfig(**audio_config.data)
+    return AudioConfig(**messages[0].data)
 
 
 def communication_loop(queue, sock):
@@ -47,12 +30,14 @@ def communication_loop(queue, sock):
 
 
 def prediction_loop(queue, audio_config, model, options):
-    sample = Sample([], audio_config.rate, audio_config.channels, audio_config.sample_size)
+    sample = Sample([], audio_config)
     while True:
         start = time.time()
         bytes_ = b''.join([queue.get() for _ in range(queue.qsize())])
         sample.append(bytes_)
         sample.transcribe(model, options)
+        if sample.result is not None:
+            print(sample.result.text, end="\r")
 
         if sample.finished or sample.is_empty:
             sample, response = _finish_sample(sample, audio_config)
@@ -74,7 +59,7 @@ def _finish_sample(sample, audio_config):
     overlap_bytes = round_to_nearest_appropriate_number(SAMPLE_OVERLAP * audio_config.bytes_per_second,
                                                         audio_config.sample_size)
     initial_fragment = b''.join(sample.fragments)[-overlap_bytes:]
-    sample = Sample([initial_fragment], audio_config.rate, audio_config.channels, audio_config.sample_size)
+    sample = Sample([initial_fragment], audio_config)
 
     return sample, response
 

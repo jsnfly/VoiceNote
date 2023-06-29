@@ -2,6 +2,7 @@ import ast
 import time
 import json
 
+
 # TODO: Type hints would make this easier to understand.
 class Message:
     SEP = "\n\n\n\n\n\n\n\n\n".encode()  # Can't be too short or else it will appear by chance.

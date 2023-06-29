@@ -3,7 +3,8 @@ import socket
 import time
 import argparse
 from functools import lru_cache, partial
-from utils import audio, recv_messages, send_message, send_data
+from utils.audio import audio
+from utils.message import recv_messages, send_message, send_data
 from utils.misc import prepare_log_file, log_bytes
 from client_config import AUDIO_FORMAT, NUM_CHANNELS
 

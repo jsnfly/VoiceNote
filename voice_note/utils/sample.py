@@ -6,18 +6,16 @@ from pathlib import Path
 from torchaudio.transforms import Resample
 from whisper.decoding import DecodingTask
 
-torch.set_num_threads(1)
+torch.set_num_threads(1)  # TODO: is this necessary?
 
 
 class Sample:
 
-    def __init__(self, fragments, rate, channels, sample_size):
+    def __init__(self, fragments, audio_config):
         self.fragments = fragments
-        self.rate = rate
-        self.channels = channels
-        self.sample_size = sample_size
+        self.audio_config = audio_config
 
-        self.resampler = Resample(rate, 16_000)
+        self.resampler = Resample(audio_config.rate, 16_000)
 
         self.result: whisper.DecodingResult = None
         self.time_of_last_transcription_change = None
@@ -27,8 +25,9 @@ class Sample:
         self.fragments.append(fragment)
 
     def transcribe(self, model, options):
-        if not len(self):
+        if len(self) == 0:
             return
+
         if not hasattr(self, 'decoding_task'):
             self.decoding_task = DecodingTask(model, options)
 
@@ -79,15 +78,15 @@ class Sample:
 
     def to_wav_file(self, file_path):
         wf = wave.open(file_path, 'wb')
-        wf.setnchannels(self.channels)
-        wf.setsampwidth(self.sample_size)
-        wf.setframerate(self.resampler.orig_freq)
+        wf.setnchannels(self.audio_config.channels)
+        wf.setsampwidth(self.audio_config.sample_size)
+        wf.setframerate(self.audio_config.rate)
 
         data = b''.join(self.fragments)
 
         # 1 second is added to account for inaccuracies.
         speech_duration = (self.last_token - self.decoding_task.tokenizer.timestamp_begin) * 0.02 + 1
 
-        num_speech_bytes = min(len(data), int(speech_duration * self.resampler.orig_freq * self.sample_size))
+        num_speech_bytes = min(len(data), int(speech_duration * self.audio_config.bytes_per_second))
         wf.writeframes(data[:num_speech_bytes])
         wf.close()
