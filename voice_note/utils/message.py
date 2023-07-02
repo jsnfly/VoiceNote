@@ -1,5 +1,4 @@
 import ast
-import time
 import json
 
 
@@ -48,19 +47,8 @@ class Message:
         return dict_node
 
 
-# TODO: own Socket class?
-def send_message(data, socket):
-    send_data(Message(data).encode(), socket)
-
-
-def send_data(data, socket):
-    bytes_sent = 0
-    while bytes_sent < len(data):
-        try:
-            bytes_sent += socket.send(data[bytes_sent:])
-        except BlockingIOError:
-            # Send buffer is full, wait a bit and try again.
-            time.sleep(0.02)
+def send_message(data, sock):
+    sock.sendall(Message(data).encode())
 
 
 def _ends_with_incomplete_separator(bytes_):
@@ -69,31 +57,15 @@ def _ends_with_incomplete_separator(bytes_):
     return bytes_.endswith(tuple(bytes([i]) for i in Message.SEP))
 
 
-def recv_messages(socket, blocking=True):
+def recv_message(sock):
+    message = b''
+    while len(message.split(Message.SEP)) != 3:
+        message += sock.recv(4096)
+    return Message.decode(message)
 
-    # Socket is supposed to be non-blocking, because otherwise `socket.recv` will block until it receives at least one
-    # byte.
-    # Good resource: https://docs.python.org/3/howto/sockets.html#socket-howto
-    assert not socket.getblocking(), "Only non-blocking sockets are supported."
 
-    bytes_ = b''
-    while True:
-        try:
-            received = socket.recv(4096)
-            bytes_ += received  # May be slow because bytes are immutable, but should not matter.
-            if len(received) == 4096:  # TODO: if len(received) == 0:  # Connection closed?
-                continue
-        except BlockingIOError:
-            # Nothing to receive.
-            if blocking:
-                time.sleep(0.02)
-                continue
-            else:
-                return [], bytes_
-        splits = bytes_.split(Message.SEP)
-        if not (len(splits) % 2 == 0 or _ends_with_incomplete_separator(bytes_)):
-            break
-    messages = [splits[i] for i in range(1, len(splits) - 1) if splits[i-1] == splits[i+1] == b'']
-    other = [sp for sp in splits if len(sp) > 0 and sp not in messages]
-
-    return [Message.decode(msg) for msg in messages], b''.join(other)
+def recv_bytes_stream(sock):
+    bytes_ = []
+    while (received := sock.recv(4096)) != b'':
+        bytes_.append(received)
+    return b''.join(bytes_)

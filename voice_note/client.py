@@ -1,31 +1,35 @@
+import argparse
 import pyaudio
 import socket
 import time
-import argparse
+import PySimpleGUI as sg
 from functools import lru_cache, partial
 from utils.audio import audio
-from utils.message import recv_messages, send_message, send_data
-from utils.misc import prepare_log_file, log_bytes
+from utils.message import recv_message, send_message
 from client_config import AUDIO_FORMAT, NUM_CHANNELS
 
-BYTES_LOG_FILE = 'logs/client_bytes.log'
-prepare_log_file(BYTES_LOG_FILE)
 
-
-def connect(sock, host, port, input_device_index):
+def setup(host, port, input_device_index):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     while True:
         try:
             sock.connect((host, port))
-            sock.setblocking(0)
-            print('Connected.')
             send_message(get_audio_config(input_device_index), sock)
-            messages, _ = recv_messages(sock)
-            assert messages[0]['response'] == 'OK'
-            print('Initialized.')
+            msg = recv_message(sock)
+            assert msg['response'] == 'OK'
             break
         except ConnectionRefusedError:
-            print('Trying to connect...')
-            time.sleep(1.0)
+            time.sleep(0.2)
+
+    stream = audio.open(
+            **get_audio_config(input_device_index),
+            input=True,
+            frames_per_buffer=pyaudio.paFramesPerBufferUnspecified,
+            input_device_index=input_device_index,
+            stream_callback=partial(callback, sock)
+        )
+
+    return sock, stream
 
 
 @lru_cache(maxsize=1)
@@ -42,63 +46,50 @@ def get_audio_config(input_device_index):
     }
 
 
-def get_stream(sock, input_device_index):
-    stream = audio.open(
-            **get_audio_config(input_device_index),
-            input=True,
-            frames_per_buffer=pyaudio.paFramesPerBufferUnspecified,
-            input_device_index=input_device_index,
-            stream_callback=get_callback(sock)
-        )
-    return stream
-
-
-def get_callback(sock):
-    return partial(_callback, sock)
-
-
-def _callback(sock, in_data, *args):
+def callback(sock, in_data, *args):
     try:
-        send_data(in_data, sock)
-        if BYTES_LOG_FILE is not None:
-            with open(BYTES_LOG_FILE, 'a') as f:
-                log_bytes(in_data, f)
-        _ = None
-        # messages, _ = recv_messages(sock, blocking=False)
-        # for msg in messages:
-        #     if 'text' in msg:
-        #         print(msg['text'])
-        #     if 'audio' in msg:
-        #         msg_audio = msg['audio']
-        #         out_stream = audio.open(format=audio.get_format_from_width(msg_audio['width']),
-        #                                 channels=msg_audio['channels'], rate=msg_audio['rate'], output=True)
-        #         # TODO: gets picked up by microphone.
-        #         out_stream.write(msg_audio['frames'])
-        #         out_stream.close()
-        return _, pyaudio.paContinue
+        sock.sendall(in_data)
+        return None, pyaudio.paContinue
     except BrokenPipeError:
-        return _, pyaudio.paComplete
+        return None, pyaudio.paComplete
 
 
-def main(host, port, input_device_index):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        connect(sock, host, port, input_device_index)
-        stream = get_stream(sock, input_device_index)
+def teardown(sock, stream):
+    stream.stop_stream()
+    stream.close()
 
-        print("* recording")
-        while stream.is_active():
-            time.sleep(0.1)
-
-        stream.stop_stream()
-        stream.close()
-        audio.terminate()
+    sock.shutdown(1)
+    msg = recv_message(sock)
+    window['message'].update(msg["text"])
+    sock.close()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default='0.0.0.0')
+    parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", default=12345, type=int)
     parser.add_argument("--input-device-index", type=int)
 
     args = parser.parse_args()
-    main(args.host, args.port, args.input_device_index)
+
+    sock = stream = None
+
+    elements = [
+        [sg.RealtimeButton("REC", button_color="red")],
+        [sg.Text(text="STOPPED", key="status")],
+        [sg.Text(text="", key="message")]
+    ]
+    window = sg.Window("Voice Note Client", elements, size=(750, 500), element_justification="c", finalize=True)
+    while True:
+        event, _ = window.read(timeout=100)
+        if event == sg.WIN_CLOSED:
+            break
+        elif event == sg.TIMEOUT_EVENT:
+            if window["status"].get() == "RECORDING":
+                teardown(sock, stream)
+            window["status"].update("STOPPED")
+        else:
+            if window["status"].get() == "STOPPED":
+                window["status"].update("CONNECTING...")
+                sock, stream = setup(args.host, args.port, args.input_device_index)
+            window["status"].update("RECORDING")

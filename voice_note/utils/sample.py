@@ -6,49 +6,26 @@ from pathlib import Path
 from torchaudio.transforms import Resample
 from whisper.decoding import DecodingTask
 
-torch.set_num_threads(1)  # TODO: is this necessary?
-
 
 class Sample:
 
     def __init__(self, fragments, audio_config):
         self.fragments = fragments
         self.audio_config = audio_config
-
         self.resampler = Resample(audio_config.rate, 16_000)
-
         self.result: whisper.DecodingResult = None
-        self.time_of_last_transcription_change = None
-        self._finished = False
 
     def append(self, fragment):
         self.fragments.append(fragment)
 
     def transcribe(self, model, options):
-        if len(self) == 0:
+        if len(self.fragments) == 0:
             return
 
         if not hasattr(self, 'decoding_task'):
             self.decoding_task = DecodingTask(model, options)
 
-        new_result = self.decoding_task.run(self.mel_spectrogram.unsqueeze(0).to(model.device))[0]
-
-        if self.last_token != new_result.tokens[-1]:
-            # If the final timestamp is different there was additional speech added since last transcription.
-            # Sometimes the final token is not a timestamp. This is also a sign that the transcription is still
-            # changing.
-            self.time_of_last_transcription_change = time.time()
-        elif time.time() - self.time_of_last_transcription_change > 2:
-            # If no speech was added for two seconds the sample is assumed to be finished.
-            self._finished = True
-        self.result = new_result
-
-    @property
-    def last_token(self):
-        return None if self.result is None else self.result.tokens[-1]
-
-    def __len__(self):
-        return len(b''.join(self.fragments))
+        self.result = self.decoding_task.run(self.mel_spectrogram.unsqueeze(0).to(model.device))[0]
 
     @property
     def mel_spectrogram(self):
@@ -57,15 +34,6 @@ class Sample:
         resampled = self.resampler(data)
         padded = whisper.pad_or_trim(resampled)
         return whisper.log_mel_spectrogram(padded)
-
-    @property
-    def finished(self):
-        return self._finished
-
-    @property
-    def is_empty(self):
-        # TODO: 0.7 seems to low, but higher also gives False negatives
-        return self.result is not None and self.result.no_speech_prob > 0.7
 
     def save(self, save_dir):
         assert self.result is not None, "Please call `.transcribe` first"
@@ -83,10 +51,5 @@ class Sample:
         wf.setframerate(self.audio_config.rate)
 
         data = b''.join(self.fragments)
-
-        # 1 second is added to account for inaccuracies.
-        speech_duration = (self.last_token - self.decoding_task.tokenizer.timestamp_begin) * 0.02 + 1
-
-        num_speech_bytes = min(len(data), int(speech_duration * self.audio_config.bytes_per_second))
-        wf.writeframes(data[:num_speech_bytes])
+        wf.writeframes(data)
         wf.close()
