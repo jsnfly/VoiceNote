@@ -10,6 +10,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.util.Log
 import android.widget.Button
+import android.widget.EditText
 import androidx.core.app.ActivityCompat
 import java.io.DataOutputStream
 import java.io.DataInputStream
@@ -29,23 +30,28 @@ class MainActivity : AppCompatActivity() {
     private var dataInputStream: DataInputStream? = null
     private var streamingThread: Thread? = null
     private var isStreaming: Boolean = false
+    private var textOutput: EditText? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         val streamButton: Button = findViewById(R.id.streamButton)
+        textOutput = findViewById(R.id.plain_text_input)
+
         streamButton.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
-                startStreaming()
+                stream()
             } else if (event.action == MotionEvent.ACTION_UP) {
-                stopStreaming()
+                isStreaming = false
+                streamingThread!!.join()
+                streamingThread = null
             }
             false
         }
     }
 
-    private fun startStreaming() {
+    private fun stream() {
         streamingThread = Thread {
             connect("192.168.0.154", 12345)
             setUpAudioRecord()
@@ -59,6 +65,7 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 Log.e("ERROR", "Error while streaming audio.", e)
             }
+            stopStreaming()
         }
         streamingThread!!.start()
     }
@@ -73,7 +80,7 @@ class MainActivity : AppCompatActivity() {
                 dataInputStream = DataInputStream(socket.getInputStream())
                 break
             } catch (e: java.net.ConnectException) {
-                Thread.sleep(1000)
+                Thread.sleep(200)
 
                 // otherwise a `java.net.SocketException` is raised, that claims
                 // the socket is closed (don't understand why).
@@ -89,8 +96,19 @@ class MainActivity : AppCompatActivity() {
                 "rate" to 44100
             )
         )
-        val msg = resv_message()
+        val msg = recv_message()
         assert(msg["response"] == "OK")
+    }
+
+    fun send_message(data: Map<String, Any>) {
+        dataOutputStream!!.write(Message(data).encode())
+        dataOutputStream!!.flush()
+    }
+
+    fun recv_message(): Message {
+        val buffer = ByteArray(4096)
+        val bytesRead = dataInputStream!!.read(buffer)
+        return Message.decode(buffer.sliceArray(0..bytesRead-1))
     }
 
     private fun setUpAudioRecord() {
@@ -109,9 +127,9 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun writeAudioDataToSocket() {
+    private fun writeAudioDataToSocket(): Int {
         val outBuffer = ByteArray(10 * MIN_BUFFER_SIZE)
-        val numOutBytes = audioRecord!!.read(outBuffer, 0, outBuffer.size, AudioRecord.READ_NON_BLOCKING)
+        val numOutBytes = audioRecord!!.read(outBuffer, 0, outBuffer.size)
         if (numOutBytes > 0) {
             dataOutputStream!!.write(outBuffer, 0, numOutBytes)
             // // Convert sample to hex:
@@ -119,50 +137,42 @@ class MainActivity : AppCompatActivity() {
             // val hex = outBuffer.sliceArray(start until numOutBytes).joinToString(separator = " ") { String.format("%02X", it) }
             // Log.d("DEBUG", "After $noEmptyLoops sent $numOutBytes: $hex.")
         }
-    }
-
-    fun send_message(data: Map<String, Any>) {
-        dataOutputStream!!.write(Message(data).encode())
-        dataOutputStream!!.flush()
-    }
-
-    fun resv_message(): Message {
-        val buffer = ByteArray(1024)
-        val bytesRead = dataInputStream!!.read(buffer)
-        return Message.decode(buffer.sliceArray(0..bytesRead-1))
+        return numOutBytes
     }
 
     private fun stopStreaming() {
+        Log.d("DEBUGX", "stopStreaming")
         audioRecord!!.stop()
-        isStreaming = false
-
+        var numOutBytes = writeAudioDataToSocket()
+        while (numOutBytes > 0) {
+            numOutBytes = writeAudioDataToSocket()
+        }
 
         audioRecord!!.release()
         audioRecord = null
 
         dataOutputStream!!.flush()
-        dataOutputStream!!.close()
 
+        socket.shutdownOutput()
+
+        val text = recv_message()["text"]
+        Log.d("DEBUGX", "$text")
+        textOutput!!.setText(text.toString())
+
+        dataOutputStream!!.close()
         dataInputStream!!.close()
 
         socket.close()
         socket = Socket()
-
-        streamingThread = null
     }
 
     override fun onDestroy() {
+        Log.d("DEBUGX", "onDestroy")
         super.onDestroy()
-        audioRecord?.release()
-        socket.close()
-        dataOutputStream?.close()
-        dataInputStream?.close()
     }
 
     override fun onPause() {
+        Log.d("DEBUGX", "onPause")
         super.onPause()
-        if (isStreaming) {
-            stopStreaming()
-        }
     }
 }
