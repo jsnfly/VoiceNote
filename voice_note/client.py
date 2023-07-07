@@ -6,7 +6,9 @@ import PySimpleGUI as sg
 from functools import lru_cache, partial
 from utils.audio import audio
 from utils.message import recv_message, send_message
-from client_config import AUDIO_FORMAT, NUM_CHANNELS
+
+AUDIO_FORMAT = pyaudio.paInt16  # https://en.wikipedia.org/wiki/Audio_bit_depth,
+NUM_CHANNELS = 1  # Number of audio channels
 
 
 def setup(host, port, input_device_index):

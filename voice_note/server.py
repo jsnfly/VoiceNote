@@ -1,12 +1,13 @@
 import whisper
+from pathlib import Path
 from socket import create_server
 from utils.audio import AudioConfig
 from utils.sample import Sample
 from utils.message import recv_message, send_message, recv_bytes_stream
-from server_config import SAVE_DIR
 
 PORT = 12345
 MODEL = 'medium'
+SAVE_DIR = Path(__file__).parent.resolve() / 'outputs/v0'
 
 
 def initialize(sock):
