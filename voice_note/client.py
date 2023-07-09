@@ -1,4 +1,3 @@
-import argparse
 import pyaudio
 import socket
 import time
@@ -7,6 +6,9 @@ from functools import lru_cache, partial
 from utils.audio import audio
 from utils.message import recv_message, send_message
 
+HOST = '0.0.0.0'
+PORT = 12345
+INPUT_DEVICE_INDEX = None
 AUDIO_FORMAT = pyaudio.paInt16  # https://en.wikipedia.org/wiki/Audio_bit_depth,
 NUM_CHANNELS = 1  # Number of audio channels
 
@@ -67,21 +69,14 @@ def teardown(sock, stream):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", default=12345, type=int)
-    parser.add_argument("--input-device-index", type=int)
-
-    args = parser.parse_args()
-
     sock = stream = None
 
     elements = [
         [sg.RealtimeButton("REC", button_color="red")],
         [sg.Text(text="STOPPED", key="status")],
-        [sg.Text(text="", key="message")]
+        [sg.Text(text="", size=(40, 20), key="message", background_color='#262624')]
     ]
-    window = sg.Window("Voice Note Client", elements, size=(750, 500), element_justification="c", finalize=True)
+    window = sg.Window("Voice Note Client", elements, size=(400, 750), element_justification="c", finalize=True)
     while True:
         event, _ = window.read(timeout=100)
         if event == sg.WIN_CLOSED:
@@ -93,5 +88,5 @@ if __name__ == "__main__":
         else:
             if window["status"].get() == "STOPPED":
                 window["status"].update("CONNECTING...")
-                sock, stream = setup(args.host, args.port, args.input_device_index)
+                sock, stream = setup(HOST, PORT, INPUT_DEVICE_INDEX)
             window["status"].update("RECORDING")
