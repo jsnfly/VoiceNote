@@ -43,6 +43,7 @@ class Sample:
         with open(save_path / 'prediction.txt', 'w') as f:
             f.write(self.result.text)
         self.to_wav_file(str(save_path / 'sample.wav'))
+        return save_path
 
     def to_wav_file(self, file_path):
         wf = wave.open(file_path, 'wb')

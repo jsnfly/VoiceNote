@@ -13,27 +13,37 @@ AUDIO_FORMAT = pyaudio.paInt16  # https://en.wikipedia.org/wiki/Audio_bit_depth,
 NUM_CHANNELS = 1  # Number of audio channels
 
 
-def setup(host, port, input_device_index):
+def setup_connection(host, port, init_msg):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     while True:
         try:
             sock.connect((host, port))
-            send_message(get_audio_config(input_device_index), sock)
+            send_message(init_msg, sock)
             msg = recv_message(sock)
             assert msg['response'] == 'OK'
             break
         except ConnectionRefusedError:
             time.sleep(0.2)
+    return sock
 
+
+def setup_stream(sock, input_device_index):
     stream = audio.open(
-            **get_audio_config(input_device_index),
-            input=True,
-            frames_per_buffer=pyaudio.paFramesPerBufferUnspecified,
-            input_device_index=input_device_index,
-            stream_callback=partial(callback, sock)
-        )
+        **get_audio_config(input_device_index),
+        input=True,
+        frames_per_buffer=pyaudio.paFramesPerBufferUnspecified,
+        input_device_index=input_device_index,
+        stream_callback=partial(callback, sock)
+    )
+    return stream
 
-    return sock, stream
+
+def callback(sock, in_data, *args):
+    try:
+        sock.sendall(in_data)
+        return None, pyaudio.paContinue
+    except BrokenPipeError:
+        return None, pyaudio.paComplete
 
 
 @lru_cache(maxsize=1)
@@ -50,31 +60,24 @@ def get_audio_config(input_device_index):
     }
 
 
-def callback(sock, in_data, *args):
-    try:
-        sock.sendall(in_data)
-        return None, pyaudio.paContinue
-    except BrokenPipeError:
-        return None, pyaudio.paComplete
-
-
 def teardown(sock, stream):
     stream.stop_stream()
     stream.close()
 
     sock.shutdown(1)
     msg = recv_message(sock)
-    window['message'].update(msg["text"])
     sock.close()
+    return msg.data
 
 
 if __name__ == "__main__":
-    sock = stream = None
+    sock = stream = current_output = None
 
     elements = [
         [sg.RealtimeButton("REC", button_color="red")],
         [sg.Text(text="STOPPED", key="status")],
-        [sg.Text(text="", size=(40, 20), key="message", background_color='#262624')]
+        [sg.Text(text="", size=(40, 20), key="message", background_color='#262624')],
+        [sg.Button(button_text="Delete", disabled=True)]
     ]
     window = sg.Window("Voice Note Client", elements, size=(400, 750), element_justification="c", finalize=True)
     while True:
@@ -83,10 +86,21 @@ if __name__ == "__main__":
             break
         elif event == sg.TIMEOUT_EVENT:
             if window["status"].get() == "RECORDING":
-                teardown(sock, stream)
+                current_output = teardown(sock, stream)
+                window["message"].update(current_output["text"])
+                window["Delete"].update(disabled=False)
             window["status"].update("STOPPED")
+        elif event == 'Delete':
+            sock = setup_connection(HOST, PORT, {'Delete': current_output['save_path']})
+            sock.shutdown(1)
+            msg = recv_message(sock)
+            assert msg['response'] == 'OK'
+            sock.close()
+            window["Delete"].update(disabled=True)
+            window["message"].update("")
         else:
             if window["status"].get() == "STOPPED":
                 window["status"].update("CONNECTING...")
-                sock, stream = setup(HOST, PORT, INPUT_DEVICE_INDEX)
+                sock = setup_connection(HOST, PORT, get_audio_config(INPUT_DEVICE_INDEX))
+                stream = setup_stream(sock, INPUT_DEVICE_INDEX)
             window["status"].update("RECORDING")
