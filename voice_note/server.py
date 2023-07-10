@@ -10,8 +10,8 @@ MODEL = 'medium'
 SAVE_DIR = Path(__file__).parent.resolve() / 'outputs/v0'
 
 
-def handle_deletion(path):
-    save_path = Path(init_msg['Delete'])
+def handle_deletion(save_path):
+    save_path = Path(save_path)
     for file in save_path.iterdir():
         file.unlink()
     save_path.rmdir()
@@ -38,10 +38,9 @@ if __name__ == '__main__':
         while True:
             conn_sock, conn_addr = sock.accept()
             print(f"Connected by {conn_addr}")
-            init_msg = recv_message(conn_sock)
-            send_message({'response': 'OK'}, conn_sock)
-            if 'Delete' in init_msg:
-                handle_deletion(init_msg['Delete'])
-                send_message({'response': 'OK'}, conn_sock)
-            else:
-                handle_audio_stream(AudioConfig(**init_msg.data), conn_sock)
+            msg = recv_message(conn_sock)
+            action = msg.data.get('action', None)
+            if action is None:
+                handle_audio_stream(AudioConfig(**msg.data), conn_sock)
+            elif action == 'delete':
+                handle_deletion(msg['save_path'])

@@ -13,21 +13,19 @@ AUDIO_FORMAT = pyaudio.paInt16  # https://en.wikipedia.org/wiki/Audio_bit_depth,
 NUM_CHANNELS = 1  # Number of audio channels
 
 
-def setup_connection(host, port, init_msg):
+def setup_connection(host, port):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     while True:
         try:
             sock.connect((host, port))
-            send_message(init_msg, sock)
-            msg = recv_message(sock)
-            assert msg['response'] == 'OK'
             break
         except ConnectionRefusedError:
-            time.sleep(0.2)
+            time.sleep(0.1)
     return sock
 
 
 def setup_stream(sock, input_device_index):
+    send_message(get_audio_config(input_device_index), sock)
     stream = audio.open(
         **get_audio_config(input_device_index),
         input=True,
@@ -70,8 +68,14 @@ def teardown(sock, stream):
     return msg.data
 
 
+def delete_message(response):
+    sock = setup_connection(HOST, PORT)
+    send_message({'action': 'delete', 'save_path': response['save_path']}, sock)
+    sock.close()
+
+
 if __name__ == "__main__":
-    sock = stream = current_output = None
+    sock = stream = response = None
 
     elements = [
         [sg.RealtimeButton("REC", button_color="red")],
@@ -86,21 +90,17 @@ if __name__ == "__main__":
             break
         elif event == sg.TIMEOUT_EVENT:
             if window["status"].get() == "RECORDING":
-                current_output = teardown(sock, stream)
-                window["message"].update(current_output["text"])
+                response = teardown(sock, stream)
+                window["message"].update(response["text"])
                 window["Delete"].update(disabled=False)
             window["status"].update("STOPPED")
         elif event == 'Delete':
-            sock = setup_connection(HOST, PORT, {'Delete': current_output['save_path']})
-            sock.shutdown(1)
-            msg = recv_message(sock)
-            assert msg['response'] == 'OK'
-            sock.close()
+            delete_message(response)
             window["Delete"].update(disabled=True)
             window["message"].update("")
         else:
             if window["status"].get() == "STOPPED":
                 window["status"].update("CONNECTING...")
-                sock = setup_connection(HOST, PORT, get_audio_config(INPUT_DEVICE_INDEX))
+                sock = setup_connection(HOST, PORT)
                 stream = setup_stream(sock, INPUT_DEVICE_INDEX)
             window["status"].update("RECORDING")
