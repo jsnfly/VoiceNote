@@ -72,9 +72,9 @@ def teardown(sock, stream):
     return msg.data
 
 
-def delete_message(response):
+def single_message(msg):
     sock = setup_connection(HOST, PORT)
-    send_message({'action': 'delete', 'save_path': response['save_path']}, sock)
+    send_message(msg, sock)
     sock.close()
 
 
@@ -85,7 +85,7 @@ if __name__ == "__main__":
         [sg.RealtimeButton("REC", button_color="red")],
         [sg.Text(text="STOPPED", key="status")],
         [sg.Text(text="", size=(40, 20), key="message", background_color='#262624')],
-        [sg.Button(button_text="Delete", disabled=True)],
+        [sg.Button(button_text="Delete", disabled=True), sg.Button(button_text="Wrong", disabled=True)],
         [sg.Text(text="Topic:"), sg.Input(default_text="misc", size=(16, 1), key="topic")]
     ]
     window = sg.Window("Voice Note Client", elements, size=(400, 750), element_justification="c", finalize=True)
@@ -98,11 +98,15 @@ if __name__ == "__main__":
                 response = teardown(sock, stream)
                 window["message"].update(response["text"])
                 window["Delete"].update(disabled=False)
+                window["Wrong"].update(disabled=False)
             window["status"].update("STOPPED")
         elif event == 'Delete':
-            delete_message(response)
+            single_message({'action': 'delete', 'save_path': response['save_path']})
             window["Delete"].update(disabled=True)
             window["message"].update("")
+        elif event == 'Wrong':
+            single_message({'action': 'wrong', 'save_path': response['save_path']})
+            window["Wrong"].update(disabled=True)
         else:
             if window["status"].get() == "STOPPED":
                 window["status"].update("CONNECTING...")

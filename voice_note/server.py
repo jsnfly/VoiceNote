@@ -1,3 +1,4 @@
+import json
 import whisper
 from pathlib import Path
 from socket import create_server
@@ -31,6 +32,19 @@ def handle_audio_stream(audio_config, sock, topic):
     sock.close()
 
 
+def add_to_metadata(save_path, data):
+    metadata_path = Path(save_path) / 'metadata.json'
+    if metadata_path.exists():
+        with metadata_path.open() as f:
+            metadata = json.load(f)
+    else:
+        metadata = {}
+
+    metadata = metadata | data
+    with metadata_path.open('w') as f:
+        json.dump(metadata, f, sort_keys=True, indent=4, ensure_ascii=False)
+
+
 if __name__ == '__main__':
     model = whisper.load_model(MODEL, device='cuda')
     options = whisper.DecodingOptions()
@@ -44,3 +58,5 @@ if __name__ == '__main__':
                 handle_audio_stream(AudioConfig(**msg['audio_config']), conn_sock, msg['topic'])
             elif action == 'delete':
                 handle_deletion(msg['save_path'])
+            elif action == 'wrong':
+                add_to_metadata(msg['save_path'], {'transcription_error': True})
