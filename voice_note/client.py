@@ -24,8 +24,12 @@ def setup_connection(host, port):
     return sock
 
 
-def setup_stream(sock, input_device_index):
-    send_message(get_audio_config(input_device_index), sock)
+def setup_stream(sock, input_device_index, topic):
+    msg = {
+        'audio_config': get_audio_config(input_device_index),
+        'topic': topic
+    }
+    send_message(msg, sock)
     stream = audio.open(
         **get_audio_config(input_device_index),
         input=True,
@@ -81,7 +85,8 @@ if __name__ == "__main__":
         [sg.RealtimeButton("REC", button_color="red")],
         [sg.Text(text="STOPPED", key="status")],
         [sg.Text(text="", size=(40, 20), key="message", background_color='#262624')],
-        [sg.Button(button_text="Delete", disabled=True)]
+        [sg.Button(button_text="Delete", disabled=True)],
+        [sg.Text(text="Topic:"), sg.Input(default_text="misc", size=(16, 1), key="topic")]
     ]
     window = sg.Window("Voice Note Client", elements, size=(400, 750), element_justification="c", finalize=True)
     while True:
@@ -102,5 +107,5 @@ if __name__ == "__main__":
             if window["status"].get() == "STOPPED":
                 window["status"].update("CONNECTING...")
                 sock = setup_connection(HOST, PORT)
-                stream = setup_stream(sock, INPUT_DEVICE_INDEX)
+                stream = setup_stream(sock, INPUT_DEVICE_INDEX, window["topic"].get())
             window["status"].update("RECORDING")
