@@ -10,13 +10,14 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.util.Log
 import android.widget.Button
-import android.widget.EditText
+import android.widget.TextView
 import androidx.core.app.ActivityCompat
 import java.io.DataOutputStream
 import java.io.DataInputStream
 import java.net.Socket
 import java.net.InetSocketAddress
 import Message
+import android.annotation.SuppressLint
 import android.view.MotionEvent
 
 class MainActivity : AppCompatActivity() {
@@ -30,17 +31,18 @@ class MainActivity : AppCompatActivity() {
     private var dataInputStream: DataInputStream? = null
     private var streamingThread: Thread? = null
     private var isStreaming: Boolean = false
-    private var textOutput: EditText? = null
-
+    private var textOutput: TextView? = null
+    @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        val streamButton: Button = findViewById(R.id.streamButton)
-        textOutput = findViewById(R.id.plain_text_input)
+        val recordButton: Button = findViewById(R.id.recordButton)
+        textOutput = findViewById(R.id.transcription)
 
-        streamButton.setOnTouchListener { _, event ->
+        recordButton.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
+                recordButton.setBackgroundColor(getResources().getColor(R.color.black));
                 stream()
             } else if (event.action == MotionEvent.ACTION_UP) {
                 isStreaming = false
