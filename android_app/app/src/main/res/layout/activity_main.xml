@@ -14,7 +14,7 @@
         android:layout_centerHorizontal="true"
         android:layout_marginTop="2dp"
         android:backgroundTint="#F44336"
-        android:alpha="0.8"
+        android:alpha="1.0"
         android:scaleX="0.88"
         android:textAlignment="viewStart"
         android:textAllCaps="false"
@@ -31,12 +31,13 @@
 
     <TextView
         android:id="@+id/transcription"
-        android:layout_centerHorizontal="true"
-        android:translationY="10dp"
         android:layout_width="280dp"
         android:layout_height="220dp"
-        android:alpha="0.5"
-        android:background="#B8B1B1" />
+        android:layout_centerHorizontal="true"
+        android:alpha="1.0"
+        android:background="#B8B1B1"
+        android:textSize="22sp"
+        android:translationY="10dp" />
 
     <Button
         android:id="@+id/deleteButton"
@@ -75,6 +76,7 @@
 
     <EditText
         android:id="@+id/editTextTopic"
+        android:text = "misc"
         android:layout_width="192dp"
         android:layout_height="58dp"
         android:layout_alignParentTop="true"

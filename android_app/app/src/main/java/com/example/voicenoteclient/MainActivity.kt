@@ -11,6 +11,7 @@ import android.media.MediaRecorder
 import android.util.Log
 import android.widget.Button
 import android.widget.TextView
+import android.widget.EditText
 import androidx.core.app.ActivityCompat
 import java.io.DataOutputStream
 import java.io.DataInputStream
@@ -32,14 +33,13 @@ class MainActivity : AppCompatActivity() {
 
     private var streamingThread: Thread? = null
     private var isStreaming: Boolean = false
-    private var textOutput: TextView? = null
+
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         val recordButton: Button = findViewById(R.id.recordButton)
-        textOutput = findViewById(R.id.transcription)
 
         setUpAudioRecord(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
 
@@ -51,6 +51,7 @@ class MainActivity : AppCompatActivity() {
                 isStreaming = false
                 streamingThread!!.join()
                 streamingThread = null
+                recordButton.alpha = 1.0F
             }
             false
         }
@@ -91,8 +92,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         Log.d("DEBUG", "Connected.")
-        sendMessage(audioConfig)
-        assert(recvMessage()["response"] == "OK")
+        sendMessage(mapOf("audio_config" to audioConfig, "topic" to findViewById<EditText>(R.id.editTextTopic).text.toString()))
     }
 
     private fun sendMessage(data: Map<String, Any>) {
@@ -100,7 +100,7 @@ class MainActivity : AppCompatActivity() {
         dataOutputStream!!.flush()
     }
 
-    private fun recvMessage(): Message {
+    private fun receiveMessage(): Message {
         val buffer = ByteArray(4096)
         val bytesRead = dataInputStream!!.read(buffer)
         return Message.decode(buffer.sliceArray(0 until bytesRead))
@@ -144,14 +144,11 @@ class MainActivity : AppCompatActivity() {
         while (numOutBytes > 0) {
             numOutBytes = writeAudioDataToSocket()
         }
-
-        audioRecord!!.release()
         dataOutputStream!!.flush()
-
         socket.shutdownOutput()
 
-        val text = recvMessage()["text"]
-        textOutput!!.text = text.toString()
+        val text = receiveMessage()["text"]
+        findViewById<TextView>(R.id.transcription).text = text.toString()
 
         dataOutputStream!!.close()
         dataInputStream!!.close()
