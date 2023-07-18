@@ -21,14 +21,15 @@ import android.annotation.SuppressLint
 import android.view.MotionEvent
 
 class MainActivity : AppCompatActivity() {
-    private val SAMPLE_RATE = 44100
-    private val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
-    private val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
-    private val MIN_BUFFER_SIZE = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
-    private var socket = Socket()
+    private val sampleRate = 44100
     private var audioRecord: AudioRecord? = null
+    private val audioConfig = mapOf("format" to 8, "channels" to 1, "rate" to sampleRate)
+
+    private val address = InetSocketAddress("192.168.0.154", 12345)
+    private var socket = Socket()
     private var dataOutputStream: DataOutputStream? = null
     private var dataInputStream: DataInputStream? = null
+
     private var streamingThread: Thread? = null
     private var isStreaming: Boolean = false
     private var textOutput: TextView? = null
@@ -40,9 +41,11 @@ class MainActivity : AppCompatActivity() {
         val recordButton: Button = findViewById(R.id.recordButton)
         textOutput = findViewById(R.id.transcription)
 
+        setUpAudioRecord(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+
         recordButton.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
-                recordButton.setBackgroundColor(getResources().getColor(R.color.black));
+                recordButton.alpha = 0.25F
                 stream()
             } else if (event.action == MotionEvent.ACTION_UP) {
                 isStreaming = false
@@ -55,8 +58,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun stream() {
         streamingThread = Thread {
-            connect("192.168.0.154", 12345)
-            setUpAudioRecord()
+            connect()
             audioRecord!!.startRecording()
             isStreaming = true
 
@@ -72,8 +74,7 @@ class MainActivity : AppCompatActivity() {
         streamingThread!!.start()
     }
 
-    private fun connect(host: String, port: Int) {
-        val address = InetSocketAddress(host, port)
+    private fun connect() {
         while (true) {
             Log.d("DEBUG", "Trying to connect...")
             try {
@@ -84,53 +85,47 @@ class MainActivity : AppCompatActivity() {
             } catch (e: java.net.ConnectException) {
                 Thread.sleep(200)
 
-                // otherwise a `java.net.SocketException` is raised, that claims
-                // the socket is closed (don't understand why).
+                // otherwise a `java.net.SocketException` is raised, that claims the socket is
+                // closed (don't understand why).
                 socket = Socket()
             }
         }
         Log.d("DEBUG", "Connected.")
-        send_message(
-            // TODO: Do not hardcode.
-            mapOf(
-                "format" to 8,
-                "channels" to 1,
-                "rate" to 44100
-            )
-        )
-        val msg = recv_message()
-        assert(msg["response"] == "OK")
+        sendMessage(audioConfig)
+        assert(recvMessage()["response"] == "OK")
     }
 
-    fun send_message(data: Map<String, Any>) {
+    private fun sendMessage(data: Map<String, Any>) {
         dataOutputStream!!.write(Message(data).encode())
         dataOutputStream!!.flush()
     }
 
-    fun recv_message(): Message {
+    private fun recvMessage(): Message {
         val buffer = ByteArray(4096)
         val bytesRead = dataInputStream!!.read(buffer)
-        return Message.decode(buffer.sliceArray(0..bytesRead-1))
+        return Message.decode(buffer.sliceArray(0 until bytesRead))
     }
 
-    private fun setUpAudioRecord() {
+    @Suppress("SameParameterValue")
+    private fun setUpAudioRecord(sampleRate: Int, channelConfig: Int, audioEncoding: Int) {
         if (ActivityCompat.checkSelfPermission(
                 this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
         ) {
             ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1)
         }
 
+        val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioEncoding)
         audioRecord = AudioRecord(
             MediaRecorder.AudioSource.MIC,
-            SAMPLE_RATE,
-            CHANNEL_CONFIG,
-            AUDIO_FORMAT,
-            50 * MIN_BUFFER_SIZE
+            sampleRate,
+            channelConfig,
+            audioEncoding,
+            50 * minBufferSize
         )
     }
 
     private fun writeAudioDataToSocket(): Int {
-        val outBuffer = ByteArray(10 * MIN_BUFFER_SIZE)
+        val outBuffer = ByteArray(audioRecord!!.bufferSizeInFrames * 2)
         val numOutBytes = audioRecord!!.read(outBuffer, 0, outBuffer.size)
         if (numOutBytes > 0) {
             dataOutputStream!!.write(outBuffer, 0, numOutBytes)
@@ -143,7 +138,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopStreaming() {
-        Log.d("DEBUGX", "stopStreaming")
+        Log.d("DEBUG", "stopStreaming")
         audioRecord!!.stop()
         var numOutBytes = writeAudioDataToSocket()
         while (numOutBytes > 0) {
@@ -151,15 +146,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         audioRecord!!.release()
-        audioRecord = null
-
         dataOutputStream!!.flush()
 
         socket.shutdownOutput()
 
-        val text = recv_message()["text"]
-        Log.d("DEBUGX", "$text")
-        textOutput!!.setText(text.toString())
+        val text = recvMessage()["text"]
+        textOutput!!.text = text.toString()
 
         dataOutputStream!!.close()
         dataInputStream!!.close()
@@ -169,12 +161,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        Log.d("DEBUGX", "onDestroy")
+        Log.d("DEBUG", "onDestroy")
         super.onDestroy()
     }
 
     override fun onPause() {
-        Log.d("DEBUGX", "onPause")
+        Log.d("DEBUG", "onPause")
         super.onPause()
     }
 }

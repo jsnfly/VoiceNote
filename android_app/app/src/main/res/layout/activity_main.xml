@@ -70,7 +70,8 @@
         android:text="@string/topic"
         android:textAlignment="center"
         android:textSize="34sp"
-        android:textStyle="bold" />
+        android:textStyle="bold"
+        tools:ignore="TextSizeCheck" />
 
     <EditText
         android:id="@+id/editTextTopic"
@@ -82,5 +83,8 @@
         android:layout_toEndOf="@+id/topic"
         android:background="#E3DBDB"
         android:ems="10"
-        android:textSize="26sp" />
+        android:textSize="26sp"
+        tools:ignore="LabelFor,SpeakableTextPresentCheck"
+        android:autofillHints="Topic of the audio message"
+        android:inputType="textShortMessage" />
 </RelativeLayout>
