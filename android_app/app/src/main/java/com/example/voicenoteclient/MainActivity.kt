@@ -33,6 +33,9 @@ class MainActivity : AppCompatActivity() {
 
     private var streamingThread: Thread? = null
     private var isStreaming: Boolean = false
+    private var response: Message? = null
+
+    private var deleteButton: Button? = null
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -40,6 +43,8 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         val recordButton: Button = findViewById(R.id.recordButton)
+        deleteButton = findViewById(R.id.deleteButton)
+        deleteButton!!.isEnabled = false
 
         setUpAudioRecord(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
 
@@ -51,7 +56,26 @@ class MainActivity : AppCompatActivity() {
                 isStreaming = false
                 streamingThread!!.join()
                 streamingThread = null
+                deleteButton!!.isEnabled = true
                 recordButton.alpha = 1.0F
+            }
+            false
+        }
+
+        deleteButton!!.setOnTouchListener {_, event ->
+            if (event.action == MotionEvent.ACTION_DOWN) {
+                var deletionThread = Thread {
+                    connect()
+                    sendMessage(mapOf("action" to "delete", "save_path" to response!!["save_path"].toString()))
+                    socket.close()
+                    socket = Socket()
+                    runOnUiThread {
+                        deleteButton!!.isEnabled = false
+                        findViewById<TextView>(R.id.transcription).text = ""
+                    }
+                }
+                deletionThread.start()
+                deletionThread.join()
             }
             false
         }
@@ -60,6 +84,7 @@ class MainActivity : AppCompatActivity() {
     private fun stream() {
         streamingThread = Thread {
             connect()
+            sendMessage(mapOf("audio_config" to audioConfig, "topic" to findViewById<EditText>(R.id.editTextTopic).text.toString()))
             audioRecord!!.startRecording()
             isStreaming = true
 
@@ -92,7 +117,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
         Log.d("DEBUG", "Connected.")
-        sendMessage(mapOf("audio_config" to audioConfig, "topic" to findViewById<EditText>(R.id.editTextTopic).text.toString()))
     }
 
     private fun sendMessage(data: Map<String, Any>) {
@@ -147,8 +171,8 @@ class MainActivity : AppCompatActivity() {
         dataOutputStream!!.flush()
         socket.shutdownOutput()
 
-        val text = receiveMessage()["text"]
-        findViewById<TextView>(R.id.transcription).text = text.toString()
+        response = receiveMessage()
+        findViewById<TextView>(R.id.transcription).text = response!!["text"].toString()
 
         dataOutputStream!!.close()
         dataInputStream!!.close()
