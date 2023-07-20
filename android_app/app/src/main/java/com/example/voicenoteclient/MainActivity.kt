@@ -72,6 +72,7 @@ class MainActivity : AppCompatActivity() {
                     )
                     runOnUiThread {
                         deleteButton!!.isEnabled = false
+                        wrongButton!!.isEnabled = false
                         findViewById<TextView>(R.id.transcription).text = ""
                     }
                 }
