@@ -36,6 +36,7 @@ class MainActivity : AppCompatActivity() {
     private var response: Message? = null
 
     private var deleteButton: Button? = null
+    private var wrongButton: Button? = null
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,7 +45,7 @@ class MainActivity : AppCompatActivity() {
 
         val recordButton: Button = findViewById(R.id.recordButton)
         deleteButton = findViewById(R.id.deleteButton)
-        deleteButton!!.isEnabled = false
+        wrongButton = findViewById(R.id.wrongButton)
 
         setUpAudioRecord(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
 
@@ -57,6 +58,7 @@ class MainActivity : AppCompatActivity() {
                 streamingThread!!.join()
                 streamingThread = null
                 deleteButton!!.isEnabled = true
+                wrongButton!!.isEnabled = true
                 recordButton.alpha = 1.0F
             }
             false
@@ -64,11 +66,10 @@ class MainActivity : AppCompatActivity() {
 
         deleteButton!!.setOnTouchListener {_, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
-                var deletionThread = Thread {
-                    connect()
-                    sendMessage(mapOf("action" to "delete", "save_path" to response!!["save_path"].toString()))
-                    socket.close()
-                    socket = Socket()
+                val deletionThread = Thread {
+                    singleMessage(
+                        mapOf("action" to "delete", "save_path" to response!!["save_path"].toString())
+                    )
                     runOnUiThread {
                         deleteButton!!.isEnabled = false
                         findViewById<TextView>(R.id.transcription).text = ""
@@ -79,6 +80,29 @@ class MainActivity : AppCompatActivity() {
             }
             false
         }
+
+        wrongButton!!.setOnTouchListener {_, event ->
+            if (event.action == MotionEvent.ACTION_DOWN) {
+                val wrongThread = Thread {
+                    singleMessage(
+                        mapOf("action" to "wrong", "save_path" to response!!["save_path"].toString())
+                    )
+                    runOnUiThread {
+                        wrongButton!!.isEnabled = false
+                    }
+                }
+                wrongThread.start()
+                wrongThread.join()
+            }
+            false
+        }
+    }
+
+    private fun singleMessage(msg: Map<String, String>) {
+        connect()
+        sendMessage(msg)
+        socket.close()
+        socket = Socket()
     }
 
     private fun stream() {
