@@ -3,4 +3,6 @@
     <string name="del">Delete</string>
     <string name="wrong">Wrong</string>
     <string name="topic">Topic</string>
+    <string name="default_topic">misc</string>
+    <string name="default_transcription">Press record button to transcribe speech.</string>
 </resources>

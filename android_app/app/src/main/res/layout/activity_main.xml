@@ -13,8 +13,8 @@
         android:layout_below="@+id/transcription"
         android:layout_centerHorizontal="true"
         android:layout_marginTop="2dp"
-        android:backgroundTint="#F44336"
         android:alpha="1.0"
+        android:backgroundTint="#F44336"
         android:scaleX="0.88"
         android:textAlignment="viewStart"
         android:textAllCaps="false"
@@ -34,9 +34,12 @@
         android:layout_width="280dp"
         android:layout_height="220dp"
         android:layout_centerHorizontal="true"
-        android:alpha="1.0"
-        android:background="#B8B1B1"
-        android:textSize="22sp"
+        android:hint="@string/default_transcription"
+        android:scrollbarAlwaysDrawVerticalTrack="true"
+        android:scrollbars="vertical"
+        android:textColor="#000000"
+        android:textColorHint="#33000000"
+        android:textSize="18sp"
         android:translationY="10dp" />
 
     <Button
@@ -63,32 +66,31 @@
 
     <TextView
         android:id="@+id/topic"
-        android:layout_width="105dp"
-        android:layout_height="59dp"
+        android:layout_width="82dp"
+        android:layout_height="wrap_content"
         android:layout_alignParentStart="true"
         android:layout_alignParentTop="true"
-        android:layout_marginStart="33dp"
-        android:layout_marginTop="400dp"
+        android:layout_marginStart="11dp"
+        android:layout_marginTop="407dp"
         android:fontFamily="sans-serif-condensed-light"
         android:text="@string/topic"
         android:textAlignment="center"
-        android:textSize="34sp"
+        android:textSize="24sp"
         android:textStyle="bold"
         tools:ignore="TextSizeCheck" />
 
     <EditText
         android:id="@+id/editTextTopic"
-        android:text = "misc"
-        android:layout_width="192dp"
-        android:layout_height="58dp"
+        android:layout_width="243dp"
+        android:layout_height="48dp"
+        android:layout_alignTop="@+id/topic"
         android:layout_alignParentTop="true"
-        android:layout_marginStart="5dp"
-        android:layout_marginTop="400dp"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="402dp"
         android:layout_toEndOf="@+id/topic"
-        android:background="#E3DBDB"
-        android:ems="10"
-        android:textSize="26sp"
-        tools:ignore="LabelFor,SpeakableTextPresentCheck"
         android:autofillHints="Topic of the audio message"
-        android:inputType="textShortMessage" />
+        android:inputType="textShortMessage"
+        android:text="@string/default_topic"
+        android:textSize="24sp"
+        tools:ignore="LabelFor,SpeakableTextPresentCheck" />
 </RelativeLayout>
