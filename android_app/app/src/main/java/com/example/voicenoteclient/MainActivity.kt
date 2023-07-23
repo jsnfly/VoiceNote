@@ -23,27 +23,28 @@ import android.view.MotionEvent
 
 class MainActivity : AppCompatActivity() {
     private val sampleRate = 44100
-    private var audioRecord: AudioRecord? = null
+    private lateinit var audioRecord: AudioRecord
     private val audioConfig = mapOf("format" to 8, "channels" to 1, "rate" to sampleRate)
 
     private val address = InetSocketAddress("192.168.0.154", 12345)
     private var socket = Socket()
-    private var dataOutputStream: DataOutputStream? = null
-    private var dataInputStream: DataInputStream? = null
+    private lateinit var dataOutputStream: DataOutputStream
+    private lateinit var dataInputStream: DataInputStream
 
-    private var streamingThread: Thread? = null
     private var isStreaming: Boolean = false
-    private var response: Message? = null
+    private lateinit var streamingThread: Thread
+    private lateinit var response: Message
 
-    private var deleteButton: Button? = null
-    private var wrongButton: Button? = null
+    private lateinit var recordButton: Button
+    private lateinit var deleteButton: Button
+    private lateinit var wrongButton: Button
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        val recordButton: Button = findViewById(R.id.recordButton)
+        recordButton = findViewById(R.id.recordButton)
         deleteButton = findViewById(R.id.deleteButton)
         wrongButton = findViewById(R.id.wrongButton)
 
@@ -55,24 +56,23 @@ class MainActivity : AppCompatActivity() {
                 stream()
             } else if (event.action == MotionEvent.ACTION_UP) {
                 isStreaming = false
-                streamingThread!!.join()
-                streamingThread = null
-                deleteButton!!.isEnabled = true
-                wrongButton!!.isEnabled = true
+                streamingThread.join()
+                deleteButton.isEnabled = true
+                wrongButton.isEnabled = true
                 recordButton.alpha = 1.0F
             }
             false
         }
 
-        deleteButton!!.setOnTouchListener {_, event ->
+        deleteButton.setOnTouchListener {_, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
                 val deletionThread = Thread {
                     singleMessage(
-                        mapOf("action" to "delete", "save_path" to response!!["save_path"].toString())
+                        mapOf("action" to "delete", "save_path" to response["save_path"].toString())
                     )
                     runOnUiThread {
-                        deleteButton!!.isEnabled = false
-                        wrongButton!!.isEnabled = false
+                        deleteButton.isEnabled = false
+                        wrongButton.isEnabled = false
                         findViewById<TextView>(R.id.transcription).text = ""
                     }
                 }
@@ -82,14 +82,14 @@ class MainActivity : AppCompatActivity() {
             false
         }
 
-        wrongButton!!.setOnTouchListener {_, event ->
+        wrongButton.setOnTouchListener {_, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
                 val wrongThread = Thread {
                     singleMessage(
-                        mapOf("action" to "wrong", "save_path" to response!!["save_path"].toString())
+                        mapOf("action" to "wrong", "save_path" to response["save_path"].toString())
                     )
                     runOnUiThread {
-                        wrongButton!!.isEnabled = false
+                        wrongButton.isEnabled = false
                     }
                 }
                 wrongThread.start()
@@ -110,7 +110,7 @@ class MainActivity : AppCompatActivity() {
         streamingThread = Thread {
             connect()
             sendMessage(mapOf("audio_config" to audioConfig, "topic" to findViewById<EditText>(R.id.editTextTopic).text.toString()))
-            audioRecord!!.startRecording()
+            audioRecord.startRecording()
             isStreaming = true
 
             try {
@@ -122,7 +122,7 @@ class MainActivity : AppCompatActivity() {
             }
             stopStreaming()
         }
-        streamingThread!!.start()
+        streamingThread.start()
     }
 
     private fun connect() {
@@ -145,13 +145,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sendMessage(data: Map<String, Any>) {
-        dataOutputStream!!.write(Message(data).encode())
-        dataOutputStream!!.flush()
+        dataOutputStream.write(Message(data).encode())
+        dataOutputStream.flush()
     }
 
     private fun receiveMessage(): Message {
         val buffer = ByteArray(4096)
-        val bytesRead = dataInputStream!!.read(buffer)
+        val bytesRead = dataInputStream.read(buffer)
         return Message.decode(buffer.sliceArray(0 until bytesRead))
     }
 
@@ -174,10 +174,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun writeAudioDataToSocket(): Int {
-        val outBuffer = ByteArray(audioRecord!!.bufferSizeInFrames * 2)
-        val numOutBytes = audioRecord!!.read(outBuffer, 0, outBuffer.size)
+        val outBuffer = ByteArray(audioRecord.bufferSizeInFrames * 2)
+        val numOutBytes = audioRecord.read(outBuffer, 0, outBuffer.size)
         if (numOutBytes > 0) {
-            dataOutputStream!!.write(outBuffer, 0, numOutBytes)
+            dataOutputStream.write(outBuffer, 0, numOutBytes)
             // // Convert sample to hex:
             // val start = if (numOutBytes > 64) numOutBytes - 64 else 0
             // val hex = outBuffer.sliceArray(start until numOutBytes).joinToString(separator = " ") { String.format("%02X", it) }
@@ -188,19 +188,19 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopStreaming() {
         Log.d("DEBUG", "stopStreaming")
-        audioRecord!!.stop()
+        audioRecord.stop()
         var numOutBytes = writeAudioDataToSocket()
         while (numOutBytes > 0) {
             numOutBytes = writeAudioDataToSocket()
         }
-        dataOutputStream!!.flush()
+        dataOutputStream.flush()
         socket.shutdownOutput()
 
         response = receiveMessage()
-        findViewById<TextView>(R.id.transcription).text = response!!["text"].toString()
+        findViewById<TextView>(R.id.transcription).text = response["text"].toString()
 
-        dataOutputStream!!.close()
-        dataInputStream!!.close()
+        dataOutputStream.close()
+        dataInputStream.close()
 
         socket.close()
         socket = Socket()
