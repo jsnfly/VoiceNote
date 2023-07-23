@@ -1,4 +1,6 @@
 import com.google.gson.Gson
+import java.io.DataOutputStream
+import java.io.DataInputStream
 
 class Message(private val data: Map<String, Any>) {
 
@@ -51,4 +53,15 @@ class Message(private val data: Map<String, Any>) {
     operator fun get(key: String): Any? {
         return data[key]
     }
+}
+
+fun sendMessage(data: Map<String, Any>, dataOutputStream: DataOutputStream) {
+    dataOutputStream.write(Message(data).encode())
+    dataOutputStream.flush()
+}
+
+fun receiveMessage(dataInputStream: DataInputStream): Message {
+    val buffer = ByteArray(4096)
+    val bytesRead = dataInputStream.read(buffer)
+    return Message.decode(buffer.sliceArray(0 until bytesRead))
 }
