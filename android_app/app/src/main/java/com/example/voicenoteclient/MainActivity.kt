@@ -48,6 +48,24 @@ class MainActivity : AppCompatActivity() {
         setupButtons()
     }
 
+    @Suppress("SameParameterValue")
+    private fun setUpAudioRecord(sampleRate: Int, channelConfig: Int, audioEncoding: Int) {
+        if (ActivityCompat.checkSelfPermission(
+                this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+        }
+
+        val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioEncoding)
+        audioRecord = AudioRecord(
+            MediaRecorder.AudioSource.MIC,
+            sampleRate,
+            channelConfig,
+            audioEncoding,
+            50 * minBufferSize
+        )
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     private fun setupButtons() {
         recordButton = findViewById(R.id.recordButton)
@@ -91,21 +109,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-
-    private fun sendSingleMessage(msg: Map<String, String>, onSuccess: () -> Unit ) {
-        val thread = Thread {
-            connect()
-            sendMessage(msg, dataOutputStream)
-            socket.close()
-            socket = Socket()
-            runOnUiThread {
-                onSuccess()
-            }
-        }
-        thread.start()
-        thread.join()
-    }
-
     private fun stream() {
         streamingThread = Thread {
             connect()
@@ -147,26 +150,6 @@ class MainActivity : AppCompatActivity() {
         Log.d("DEBUG", "Connected.")
     }
 
-
-
-    @Suppress("SameParameterValue")
-    private fun setUpAudioRecord(sampleRate: Int, channelConfig: Int, audioEncoding: Int) {
-        if (ActivityCompat.checkSelfPermission(
-                this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
-        ) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1)
-        }
-
-        val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioEncoding)
-        audioRecord = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
-            sampleRate,
-            channelConfig,
-            audioEncoding,
-            50 * minBufferSize
-        )
-    }
-
     private fun writeAudioDataToSocket(): Int {
         val outBuffer = ByteArray(audioRecord.bufferSizeInFrames * 2)
         val numOutBytes = audioRecord.read(outBuffer, 0, outBuffer.size)
@@ -198,6 +181,20 @@ class MainActivity : AppCompatActivity() {
 
         socket.close()
         socket = Socket()
+    }
+
+    private fun sendSingleMessage(msg: Map<String, String>, onSuccess: () -> Unit ) {
+        val thread = Thread {
+            connect()
+            sendMessage(msg, dataOutputStream)
+            socket.close()
+            socket = Socket()
+            runOnUiThread {
+                onSuccess()
+            }
+        }
+        thread.start()
+        thread.join()
     }
 
     override fun onDestroy() {
