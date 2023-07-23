@@ -66,44 +66,39 @@ class MainActivity : AppCompatActivity() {
 
         deleteButton.setOnTouchListener {_, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
-                val deletionThread = Thread {
-                    singleMessage(
-                        mapOf("action" to "delete", "save_path" to response["save_path"].toString())
-                    )
-                    runOnUiThread {
-                        deleteButton.isEnabled = false
-                        wrongButton.isEnabled = false
-                        findViewById<TextView>(R.id.transcription).text = ""
-                    }
+                sendSingleMessage(
+                    mapOf("action" to "delete", "save_path" to response["save_path"].toString())
+                ) {
+                    deleteButton.isEnabled = false
+                    wrongButton.isEnabled = false
+                    findViewById<TextView>(R.id.transcription).text = ""
                 }
-                deletionThread.start()
-                deletionThread.join()
             }
             false
         }
 
         wrongButton.setOnTouchListener {_, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
-                val wrongThread = Thread {
-                    singleMessage(
-                        mapOf("action" to "wrong", "save_path" to response["save_path"].toString())
-                    )
-                    runOnUiThread {
-                        wrongButton.isEnabled = false
-                    }
-                }
-                wrongThread.start()
-                wrongThread.join()
+                sendSingleMessage(
+                    mapOf("action" to "wrong", "save_path" to response["save_path"].toString())
+                ) { wrongButton.isEnabled = false }
             }
             false
         }
     }
 
-    private fun singleMessage(msg: Map<String, String>) {
-        connect()
-        sendMessage(msg)
-        socket.close()
-        socket = Socket()
+    private fun sendSingleMessage(msg: Map<String, String>, onSuccess: () -> Unit ) {
+        val thread = Thread {
+            connect()
+            sendMessage(msg)
+            socket.close()
+            socket = Socket()
+            runOnUiThread {
+                onSuccess()
+            }
+        }
+        thread.start()
+        thread.join()
     }
 
     private fun stream() {
