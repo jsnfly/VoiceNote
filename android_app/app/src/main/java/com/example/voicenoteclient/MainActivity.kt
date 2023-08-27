@@ -2,23 +2,20 @@ package com.example.voicenoteclient
 
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
-
-import android.Manifest
-import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
-import android.media.MediaRecorder
 import android.util.Log
 import android.widget.Button
 import android.widget.TextView
 import android.widget.EditText
-import androidx.core.app.ActivityCompat
+import android.widget.LinearLayout
 import java.io.DataOutputStream
 import java.io.DataInputStream
 import java.net.Socket
 import java.net.InetSocketAddress
 import android.annotation.SuppressLint
 import android.view.MotionEvent
+import android.view.View
 import Message
 import sendMessage
 import receiveMessage
@@ -28,7 +25,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var audioRecord: AudioRecord
     private val audioConfig = mapOf("format" to 8, "channels" to 1, "rate" to sampleRate)
 
-    private val address = InetSocketAddress("192.168.0.154", 12345)
     private var socket = Socket()
     private lateinit var dataOutputStream: DataOutputStream
     private lateinit var dataInputStream: DataInputStream
@@ -37,40 +33,21 @@ class MainActivity : AppCompatActivity() {
     private lateinit var streamingThread: Thread
     private lateinit var response: Message
 
-    private lateinit var recordButton: Button
-    private lateinit var deleteButton: Button
-    private lateinit var wrongButton: Button
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        setUpAudioRecord(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-        setupButtons()
-    }
-
-    @Suppress("SameParameterValue")
-    private fun setUpAudioRecord(sampleRate: Int, channelConfig: Int, audioEncoding: Int) {
-        if (ActivityCompat.checkSelfPermission(
-                this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
-        ) {
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1)
-        }
-
-        val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioEncoding)
-        audioRecord = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
-            sampleRate,
-            channelConfig,
-            audioEncoding,
-            50 * minBufferSize
+        audioRecord = setupAudioRecord(
+            this, sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
         )
+        setupButtons()
     }
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupButtons() {
-        recordButton = findViewById(R.id.recordButton)
-        deleteButton = findViewById(R.id.deleteButton)
-        wrongButton = findViewById(R.id.wrongButton)
+        val recordButton: Button = findViewById(R.id.recordButton)
+        val deleteButton: Button = findViewById(R.id.deleteButton)
+        val wrongButton: Button = findViewById(R.id.wrongButton)
+        val settingsButton: Button = findViewById(R.id.settingsButton)
 
         recordButton.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
@@ -107,6 +84,19 @@ class MainActivity : AppCompatActivity() {
             }
             false
         }
+
+        val settingsLayout: LinearLayout = findViewById(R.id.settingsLayout)
+        val saveButton: Button = findViewById(R.id.saveSettingsButton)
+        settingsButton.setOnClickListener {
+            if (settingsLayout.visibility == View.VISIBLE) {
+                settingsLayout.visibility = View.GONE
+            } else {
+                settingsLayout.visibility = View.VISIBLE
+            }
+        }
+        saveButton.setOnClickListener {
+            settingsLayout.visibility = View.GONE
+        }
     }
 
     private fun stream() {
@@ -135,7 +125,10 @@ class MainActivity : AppCompatActivity() {
         while (true) {
             Log.d("DEBUG", "Trying to connect...")
             try {
-                socket.connect(address)
+                socket.connect(InetSocketAddress(
+                    findViewById<EditText>(R.id.editTextHost).text.toString(),
+                    findViewById<EditText>(R.id.editTextPort).text.toString().toInt(),
+                ))
                 dataOutputStream = DataOutputStream(socket.getOutputStream())
                 dataInputStream = DataInputStream(socket.getInputStream())
                 break

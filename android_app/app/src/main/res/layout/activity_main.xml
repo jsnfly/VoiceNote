@@ -34,11 +34,12 @@
         android:layout_width="280dp"
         android:layout_height="220dp"
         android:layout_centerHorizontal="true"
+        android:background="@android:color/system_accent1_100"
         android:hint="@string/default_transcription"
         android:scrollbarAlwaysDrawVerticalTrack="true"
         android:scrollbars="vertical"
-        android:textColor="#000000"
-        android:textColorHint="#33000000"
+        android:textColor="@color/purple_200"
+        android:textColorHint="@android:color/primary_text_light"
         android:textSize="18sp"
         android:translationY="10dp" />
 
@@ -93,4 +94,62 @@
         android:text="@string/default_topic"
         android:textSize="24sp"
         tools:ignore="LabelFor,SpeakableTextPresentCheck" />
+
+    <Button
+        android:id="@+id/settingsButton"
+        android:layout_width="35dp"
+        android:layout_height="43dp"
+        android:layout_toEndOf="@+id/transcription"
+        android:translationX="10dp"
+        app:icon="@android:drawable/ic_menu_preferences"
+        app:iconGravity="textTop"
+        app:iconPadding="0dp"
+        app:iconSize="28dp"
+        tools:ignore="SpeakableTextPresentCheck,TouchTargetSizeCheck" />
+
+    <LinearLayout
+        android:id="@+id/settingsLayout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/settingsButton"
+        android:background="#CC3E3737"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/textViewHost"
+            android:text="@string/host"
+            android:layout_width="42dp"
+            android:layout_height="wrap_content" />
+
+        <EditText
+            android:id="@+id/editTextHost"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/default_host"
+            android:autofillHints="server ip address or hostname"
+            tools:ignore="LabelFor"
+            android:inputType="textUri" />
+
+        <TextView
+            android:id="@+id/textViewPort"
+            android:text="@string/port"
+            android:layout_width="42dp"
+            android:layout_height="wrap_content" />
+
+        <EditText
+            android:id="@+id/editTextPort"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/default_port"
+            android:autofillHints="server port number"
+            tools:ignore="LabelFor"
+            android:inputType="textUri" />
+
+        <Button
+            android:id="@+id/saveSettingsButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/save" />
+    </LinearLayout>
 </RelativeLayout>

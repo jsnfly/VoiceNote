@@ -5,4 +5,9 @@
     <string name="topic">Topic</string>
     <string name="default_topic">misc</string>
     <string name="default_transcription">Press record button to transcribe speech.</string>
+    <string name="host">Host</string>
+    <string name="default_host">192.168.0.154</string>
+    <string name="port">Port</string>
+    <string name="default_port">12345</string>
+    <string name="save">save</string>
 </resources>
