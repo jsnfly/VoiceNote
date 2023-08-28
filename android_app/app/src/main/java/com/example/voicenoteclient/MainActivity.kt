@@ -17,6 +17,7 @@ import android.annotation.SuppressLint
 import android.view.MotionEvent
 import android.view.View
 import Message
+import android.widget.CheckBox
 import sendMessage
 import receiveMessage
 
@@ -103,7 +104,11 @@ class MainActivity : AppCompatActivity() {
         streamingThread = Thread {
             connect()
             sendMessage(
-                mapOf("audio_config" to audioConfig, "topic" to findViewById<EditText>(R.id.editTextTopic).text.toString()),
+                mapOf(
+                    "audio_config" to audioConfig,
+                    "topic" to findViewById<EditText>(R.id.editTextTopic).text.toString(),
+                    "chat_mode" to findViewById<CheckBox>(R.id.checkBoxChatMode).isChecked
+                ),
                 dataOutputStream
             )
             audioRecord.startRecording()

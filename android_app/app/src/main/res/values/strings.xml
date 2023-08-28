@@ -10,4 +10,5 @@
     <string name="port">Port</string>
     <string name="default_port">12345</string>
     <string name="save">save</string>
+    <string name="chat_mode">Chat Mode</string>
 </resources>

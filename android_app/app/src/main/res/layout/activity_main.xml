@@ -146,6 +146,24 @@
             tools:ignore="LabelFor"
             android:inputType="textUri" />
 
+        <LinearLayout
+            android:id="@+id/chatModeLayout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/textViewChatMode"
+                android:text="@string/chat_mode"
+                android:layout_width="92dp"
+                android:layout_height="wrap_content" />
+
+            <CheckBox
+                android:id="@+id/checkBoxChatMode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
         <Button
             android:id="@+id/saveSettingsButton"
             android:layout_width="wrap_content"
