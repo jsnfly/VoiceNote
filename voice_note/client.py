@@ -1,3 +1,5 @@
+# TODO: out of date.
+
 import pyaudio
 import socket
 import time
