@@ -1,5 +1,3 @@
-# TODO: out of date.
-
 import pyaudio
 import socket
 import time
@@ -26,9 +24,10 @@ def setup_connection(host, port):
     return sock
 
 
-def setup_stream(sock, input_device_index, topic):
+def setup_stream(sock, input_device_index, topic, chat_mode):
     msg = {
         'audio_config': get_audio_config(input_device_index),
+        'chat_mode': chat_mode,
         'topic': topic
     }
     send_message(msg, sock)
@@ -88,7 +87,11 @@ if __name__ == "__main__":
         [sg.Text(text="STOPPED", key="status")],
         [sg.Text(text="", size=(40, 20), key="message", background_color='#262624')],
         [sg.Button(button_text="Delete", disabled=True), sg.Button(button_text="Wrong", disabled=True)],
-        [sg.Text(text="Topic:"), sg.Input(default_text="misc", size=(16, 1), key="topic")]
+        [
+            sg.Text(text="Topic:"),
+            sg.Input(default_text="misc", size=(16, 1), key="topic"),
+            sg.Checkbox("Chat Mode", key="chat_mode")
+        ]
     ]
     window = sg.Window("Voice Note Client", elements, size=(400, 750), element_justification="c", finalize=True)
     while True:
@@ -113,5 +116,5 @@ if __name__ == "__main__":
             if window["status"].get() == "STOPPED":
                 window["status"].update("CONNECTING...")
                 sock = setup_connection(HOST, PORT)
-                stream = setup_stream(sock, INPUT_DEVICE_INDEX, window["topic"].get())
+                stream = setup_stream(sock, INPUT_DEVICE_INDEX, window["topic"].get(), window["chat_mode"].get())
             window["status"].update("RECORDING")
