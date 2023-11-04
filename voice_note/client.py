@@ -79,6 +79,18 @@ def single_message(msg):
     sock.close()
 
 
+def play_audio(audio_dict):
+    config = audio_dict['audio_config']
+    stream = audio.open(
+        format=config['format'],
+        channels=config['channels'],
+        rate=config['rate'],
+        output=True
+    )
+    stream.write(audio_dict['data'])
+    stream.close()
+
+
 if __name__ == "__main__":
     sock = stream = response = None
 
@@ -104,6 +116,8 @@ if __name__ == "__main__":
                 window["message"].update(response["text"])
                 window["Delete"].update(disabled=False)
                 window["Wrong"].update(disabled=False)
+                if window["chat_mode"].get():
+                    play_audio(response["audio"])
             window["status"].update("STOPPED")
         elif event == 'Delete':
             single_message({'action': 'delete', 'save_path': response['save_path']})

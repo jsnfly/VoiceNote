@@ -1,11 +1,14 @@
 import json
+import pyaudio
 import whisper
 from pathlib import Path
 from socket import create_server
 from utils.audio import AudioConfig
 from utils.sample import Sample
 from utils.message import recv_message, send_message, recv_bytes_stream
+from utils.misc import tensor_dict_to_gpu
 from transformers import AutoTokenizer, LlamaForCausalLM
+from transformers import AutoProcessor, BarkModel
 
 PORT = 12345
 WHISPER_MODEL = 'medium'
@@ -71,7 +74,15 @@ def get_chat_response(query):
         llama_tokenizer(prompt, return_tensors='pt')['input_ids'].cuda(),
         generation_config
     )
-    return llama_tokenizer.decode(token_ids[0], skip_special_tokens=True)[len(prompt):]
+    text_response = llama_tokenizer.decode(token_ids[0], skip_special_tokens=True)[len(prompt):].strip()
+    return text_response, generate_speech(text_response)
+
+
+def generate_speech(text):
+    voice_preset = "v2/de_speaker_4"
+    inputs = bark_processor(text, voice_preset=voice_preset, return_tensors='pt')
+    audio_array = bark_model.generate(**tensor_dict_to_gpu(inputs)).cpu().numpy().squeeze()
+    return audio_array.tobytes()
 
 
 if __name__ == '__main__':
@@ -79,6 +90,10 @@ if __name__ == '__main__':
     whisper_options = whisper.DecodingOptions()
 
     llama_tokenizer, llama_model = load_llama()
+    if llama_model is not None:
+        bark_processor = AutoProcessor.from_pretrained('suno/bark')
+        bark_model = BarkModel.from_pretrained('suno/bark')
+        bark_model.to('cuda')
     with create_server(('0.0.0.0', PORT)) as sock:
         while True:
             conn_sock, conn_addr = sock.accept()
@@ -90,9 +105,18 @@ if __name__ == '__main__':
                 transcription, save_path = transcribe(bytes_, AudioConfig(**msg['audio_config']), msg['topic'])
                 if msg["chat_mode"]:
                     # TODO: append chat history?
+                    text_response, audio_response = get_chat_response(transcription)
                     response = {
-                        'text': f"Transcription:\n{transcription}\n\nResponse:\n{get_chat_response(transcription)}",
-                        'save_path': str(save_path)
+                        'text': f"Transcription:\n{transcription}\n\nResponse:\n{text_response}",
+                        'save_path': str(save_path),
+                        'audio': {
+                            'data': audio_response,
+                            'audio_config': {
+                                'format': pyaudio.paFloat32,
+                                'channels': 1,
+                                'rate': bark_model.generation_config.sample_rate
+                            }
+                        }
                     }
                 else:
                     response = {'text': transcription, 'save_path': str(save_path)}
