@@ -1,14 +1,14 @@
 import json
 import pyaudio
 import whisper
+import numpy as np
 from pathlib import Path
 from socket import create_server
 from utils.audio import AudioConfig
 from utils.sample import Sample
 from utils.message import recv_message, send_message, recv_bytes_stream
-from utils.misc import tensor_dict_to_gpu
 from transformers import AutoTokenizer, LlamaForCausalLM
-from transformers import AutoProcessor, BarkModel
+from TTS.api import TTS
 
 PORT = 12345
 WHISPER_MODEL = 'medium'
@@ -62,13 +62,17 @@ def get_chat_response(query):
 
     if llama_model is None:
         return 'Chat not available.'
-    prompt = f"USER: {query}\nASSISTANT:"
+    system_prompt = (
+        "A conversation between a snarky A.I. assistant and a human in german. The assistant ALWAYS responds in german. "
+        "A speech API is used for the conversation so the assistant keeps the responses short but informative."
+    )
+    prompt = f"{system_prompt}\nUSER: {query}\nASSISTANT:"
     generation_config = llama_model.generation_config
     generation_config.max_length = len(llama_tokenizer(prompt)['input_ids']) + 512
     generation_config.top_k = 1
     generation_config.do_sample = True
     generation_config.num_return_sequences = 1
-    generation_config.temperature = 1.5
+    generation_config.temperature = 1.5  # TODO: seems to have no effect?
 
     token_ids = llama_model.generate(
         llama_tokenizer(prompt, return_tensors='pt')['input_ids'].cuda(),
@@ -79,9 +83,8 @@ def get_chat_response(query):
 
 
 def generate_speech(text):
-    voice_preset = "v2/de_speaker_4"
-    inputs = bark_processor(text, voice_preset=voice_preset, return_tensors='pt')
-    audio_array = bark_model.generate(**tensor_dict_to_gpu(inputs)).cpu().numpy().squeeze()
+    reference_voice_file = "sample.wav"
+    audio_array = np.array(tts_model.tts(text, language='de', speaker_wav=reference_voice_file), dtype=np.float32)
     return audio_array.tobytes()
 
 
@@ -91,9 +94,7 @@ if __name__ == '__main__':
 
     llama_tokenizer, llama_model = load_llama()
     if llama_model is not None:
-        bark_processor = AutoProcessor.from_pretrained('suno/bark')
-        bark_model = BarkModel.from_pretrained('suno/bark')
-        bark_model.to('cuda')
+        tts_model = TTS("tts_models/multilingual/multi-dataset/xtts_v1.1").to("cuda")
     with create_server(('0.0.0.0', PORT)) as sock:
         while True:
             conn_sock, conn_addr = sock.accept()
@@ -114,7 +115,7 @@ if __name__ == '__main__':
                             'audio_config': {
                                 'format': pyaudio.paFloat32,
                                 'channels': 1,
-                                'rate': bark_model.generation_config.sample_rate
+                                'rate': tts_model.synthesizer.tts_config.audio.output_sample_rate
                             }
                         }
                     }

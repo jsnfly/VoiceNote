@@ -2,7 +2,7 @@ import pyaudio
 import socket
 import time
 import PySimpleGUI as sg
-from functools import lru_cache, partial
+from functools import lru_cache
 from utils.audio import audio
 from utils.message import recv_message, send_message
 
@@ -24,29 +24,29 @@ def setup_connection(host, port):
     return sock
 
 
-def setup_stream(sock, input_device_index, topic, chat_mode):
+def start_recording(sock, input_device_index, topic, chat_mode):
     msg = {
         'audio_config': get_audio_config(input_device_index),
         'chat_mode': chat_mode,
         'topic': topic
     }
     send_message(msg, sock)
+
+    def _callback(in_data, *args):
+        try:
+            sock.sendall(in_data)
+            return None, pyaudio.paContinue
+        except BrokenPipeError:
+            return None, pyaudio.paComplete
+
     stream = audio.open(
         **get_audio_config(input_device_index),
         input=True,
         frames_per_buffer=pyaudio.paFramesPerBufferUnspecified,
         input_device_index=input_device_index,
-        stream_callback=partial(callback, sock)
+        stream_callback=_callback
     )
     return stream
-
-
-def callback(sock, in_data, *args):
-    try:
-        sock.sendall(in_data)
-        return None, pyaudio.paContinue
-    except BrokenPipeError:
-        return None, pyaudio.paComplete
 
 
 @lru_cache(maxsize=1)
@@ -63,7 +63,7 @@ def get_audio_config(input_device_index):
     }
 
 
-def teardown(sock, stream):
+def stop_recording(sock, stream):
     stream.stop_stream()
     stream.close()
 
@@ -79,20 +79,44 @@ def single_message(msg):
     sock.close()
 
 
-def play_audio(audio_dict):
+def start_playback(audio_dict):
     config = audio_dict['audio_config']
+    data = audio_dict['data']
+
+    pointer = 0
+    bytes_per_sample = audio.get_sample_size(config['format'])
+
+    def _callback(_, frame_count, *args):
+        nonlocal pointer
+
+        end_pointer = pointer + frame_count * config['channels'] * bytes_per_sample
+        chunk = data[pointer:end_pointer]
+        pointer = end_pointer
+        return chunk, pyaudio.paContinue
+
     stream = audio.open(
         format=config['format'],
         channels=config['channels'],
         rate=config['rate'],
-        output=True
+        output=True,
+        stream_callback=_callback
     )
-    stream.write(audio_dict['data'])
+
+    return stream
+
+
+def stop_playback(stream):
+    try:
+        if stream is None or stream.is_stopped():
+            return
+    except OSError:
+        return
+    stream.stop_stream()
     stream.close()
 
 
 if __name__ == "__main__":
-    sock = stream = response = None
+    sock = rec_stream = play_stream = response = None
 
     elements = [
         [sg.RealtimeButton("REC", button_color="red")],
@@ -112,23 +136,26 @@ if __name__ == "__main__":
             break
         elif event == sg.TIMEOUT_EVENT:
             if window["status"].get() == "RECORDING":
-                response = teardown(sock, stream)
+                response = stop_recording(sock, rec_stream)
                 window["message"].update(response["text"])
                 window["Delete"].update(disabled=False)
                 window["Wrong"].update(disabled=False)
                 if window["chat_mode"].get():
-                    play_audio(response["audio"])
+                    play_stream = start_playback(response["audio"])
             window["status"].update("STOPPED")
         elif event == 'Delete':
+            stop_playback(play_stream)
             single_message({'action': 'delete', 'save_path': response['save_path']})
             window["Delete"].update(disabled=True)
             window["message"].update("")
         elif event == 'Wrong':
+            stop_playback(play_stream)
             single_message({'action': 'wrong', 'save_path': response['save_path']})
             window["Wrong"].update(disabled=True)
         else:
             if window["status"].get() == "STOPPED":
+                stop_playback(play_stream)
                 window["status"].update("CONNECTING...")
                 sock = setup_connection(HOST, PORT)
-                stream = setup_stream(sock, INPUT_DEVICE_INDEX, window["topic"].get(), window["chat_mode"].get())
+                rec_stream = start_recording(sock, INPUT_DEVICE_INDEX, window["topic"].get(), window["chat_mode"].get())
             window["status"].update("RECORDING")

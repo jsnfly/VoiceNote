@@ -1,4 +1,3 @@
-import torch
 from pathlib import Path
 from datetime import datetime
 
@@ -22,12 +21,3 @@ def log_bytes(bytes_, file_handle):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
     hex = ' '.join(f"{b:02x}" for b in bytes_)
     file_handle.write(f"{timestamp}: {hex}\n")
-
-
-def tensor_dict_to_gpu(tensor_dict):
-    for key, value in tensor_dict.items():
-        if isinstance(value, torch.Tensor):
-            tensor_dict[key] = value.cuda()
-        else:
-            tensor_dict_to_gpu(value)
-    return tensor_dict
