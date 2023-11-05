@@ -57,16 +57,12 @@ def add_to_metadata(save_path, data):
         json.dump(metadata, f, sort_keys=True, indent=4, ensure_ascii=False)
 
 
-def get_chat_response(query):
+def get_chat_response(query, prompt):
     # TODO: cleanup, flash_attention2
 
     if llama_model is None:
         return 'Chat not available.'
-    system_prompt = (
-        "A conversation between a snarky A.I. assistant and a human in german. The assistant ALWAYS responds in german. "
-        "A speech API is used for the conversation so the assistant keeps the responses short but informative."
-    )
-    prompt = f"{system_prompt}\nUSER: {query}\nASSISTANT:"
+
     generation_config = llama_model.generation_config
     generation_config.max_length = len(llama_tokenizer(prompt)['input_ids']) + 512
     generation_config.top_k = 1
@@ -82,6 +78,10 @@ def get_chat_response(query):
     return text_response, generate_speech(text_response)
 
 
+def add_query(history, query):
+    return f"{history} USER: {query} ASSISTANT:"
+
+
 def generate_speech(text):
     reference_voice_file = "sample.wav"
     audio_array = np.array(tts_model.tts(text, language='de', speaker_wav=reference_voice_file), dtype=np.float32)
@@ -93,6 +93,12 @@ if __name__ == '__main__':
     whisper_options = whisper.DecodingOptions()
 
     llama_tokenizer, llama_model = load_llama()
+    system_prompt = (
+        "A conversation between an A.I. assistant and a human user."
+        "A speech API is used for the conversation so the assistant keeps the responses short but informative."
+        "The assistant answers in the same language as the user is using (german or english)."
+    )
+    history = system_prompt
     if llama_model is not None:
         tts_model = TTS("tts_models/multilingual/multi-dataset/xtts_v1.1").to("cuda")
     with create_server(('0.0.0.0', PORT)) as sock:
@@ -105,8 +111,9 @@ if __name__ == '__main__':
                 bytes_ = recv_bytes_stream(conn_sock)
                 transcription, save_path = transcribe(bytes_, AudioConfig(**msg['audio_config']), msg['topic'])
                 if msg["chat_mode"]:
-                    # TODO: append chat history?
-                    text_response, audio_response = get_chat_response(transcription)
+                    prompt = add_query(history, transcription)
+                    text_response, audio_response = get_chat_response(transcription, prompt)
+                    history = f"{prompt} {text_response}"
                     response = {
                         'text': f"Transcription:\n{transcription}\n\nResponse:\n{text_response}",
                         'save_path': str(save_path),
@@ -127,3 +134,5 @@ if __name__ == '__main__':
                 handle_deletion(msg['save_path'])
             elif action == 'wrong':
                 add_to_metadata(msg['save_path'], {'transcription_error': True})
+            elif action == 'new_chat':
+                history = system_prompt
