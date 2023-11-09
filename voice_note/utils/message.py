@@ -1,5 +1,5 @@
-import ast
 import json
+import base64
 
 
 # TODO: Type hints would make this easier to understand.
@@ -25,26 +25,27 @@ class Message:
         return cls(cls._destringify(json.loads(bytes_.decode())))
 
     def _stringify(self, data):
-        return self._apply_recursively_to_type(str, bytes, data.copy())
+        transformed = {}
+        for key, val in data.items():
+            if isinstance(val, dict):
+                transformed[key] = self._stringify(val)
+            elif isinstance(val, bytes):
+                transformed[key + '_base64'] = base64.b64encode(val).decode()
+            else:
+                transformed[key] = val
+        return transformed
 
     @classmethod
     def _destringify(cls, data):
-        def _func(val):
-            try:
-                return ast.literal_eval(val)
-            except (ValueError, SyntaxError):
-                return val
-
-        return cls._apply_recursively_to_type(_func, str, data.copy())
-
-    @classmethod
-    def _apply_recursively_to_type(cls, func, target_type, dict_node):
-        for key, val in dict_node.items():
+        transformed = {}
+        for key, val in data.items():
             if isinstance(val, dict):
-                cls._apply_recursively_to_type(func, target_type, val)
-            elif isinstance(val, target_type):
-                dict_node[key] = func(val)
-        return dict_node
+                transformed[key] = cls._destringify(val)
+            elif key.endswith('_base64'):
+                transformed[key.removesuffix('_base64')] = base64.b64decode(val)
+            else:
+                transformed[key] = val
+        return transformed
 
 
 def send_message(data, sock):

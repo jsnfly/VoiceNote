@@ -21,10 +21,24 @@ import android.widget.CheckBox
 import sendMessage
 import receiveMessage
 
+import java.util.Base64
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+
+fun ByteArray.toFloatArray(): FloatArray {
+    val buffer = ByteBuffer.wrap(this)
+    buffer.order(ByteOrder.LITTLE_ENDIAN) // Make sure to set the correct endianness
+    val floatArray = FloatArray(this.size / 4)
+    buffer.asFloatBuffer().get(floatArray)
+    return floatArray
+}
+
 class MainActivity : AppCompatActivity() {
     private val sampleRate = 44100
     private lateinit var audioRecord: AudioRecord
     private val audioConfig = mapOf("format" to 8, "channels" to 1, "rate" to sampleRate)
+
+    private val audioPlayer = AudioPlayer()
 
     private var socket = Socket()
     private lateinit var dataOutputStream: DataOutputStream
@@ -47,11 +61,13 @@ class MainActivity : AppCompatActivity() {
     private fun setupButtons() {
         val recordButton: Button = findViewById(R.id.recordButton)
         val deleteButton: Button = findViewById(R.id.deleteButton)
+        val newChatButton: Button = findViewById(R.id.newChatButton)
         val wrongButton: Button = findViewById(R.id.wrongButton)
         val settingsButton: Button = findViewById(R.id.settingsButton)
 
         recordButton.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
+                audioPlayer.stopAudio()
                 recordButton.alpha = 0.25F
                 stream()
             } else if (event.action == MotionEvent.ACTION_UP) {
@@ -73,6 +89,7 @@ class MainActivity : AppCompatActivity() {
                     wrongButton.isEnabled = false
                     findViewById<TextView>(R.id.transcription).text = ""
                 }
+                audioPlayer.stopAudio()
             }
             false
         }
@@ -82,6 +99,17 @@ class MainActivity : AppCompatActivity() {
                 sendSingleMessage(
                     mapOf("action" to "wrong", "save_path" to response["save_path"].toString())
                 ) { wrongButton.isEnabled = false }
+                audioPlayer.stopAudio()
+            }
+            false
+        }
+
+        newChatButton.setOnTouchListener {_, event ->
+            if (event.action == MotionEvent.ACTION_DOWN) {
+                sendSingleMessage(
+                    mapOf("action" to "new_chat")
+                ) { findViewById<TextView>(R.id.transcription).text = "" }
+                audioPlayer.stopAudio()
             }
             false
         }
@@ -173,6 +201,13 @@ class MainActivity : AppCompatActivity() {
 
         response = receiveMessage(dataInputStream)
         findViewById<TextView>(R.id.transcription).text = response["text"].toString()
+
+        if (findViewById<CheckBox>(R.id.checkBoxChatMode).isChecked) {
+            val audioData = Base64.getDecoder().decode(
+                (response["audio"] as LinkedHashMap<*,*>)["data_base64"].toString()
+            ).toFloatArray()
+            audioPlayer.playAudio(audioData)
+        }
 
         dataOutputStream.close()
         dataInputStream.close()

@@ -1,6 +1,8 @@
 import com.google.gson.Gson
 import java.io.DataOutputStream
 import java.io.DataInputStream
+import java.io.ByteArrayOutputStream
+import java.net.SocketException
 
 class Message(private val data: Map<String, Any>) {
 
@@ -9,17 +11,8 @@ class Message(private val data: Map<String, Any>) {
 
         fun decode(bytes: ByteArray): Message {
             val json = bytes.toString(Charsets.UTF_8).replace(SEP, "")
-            val data = Gson().fromJson(json, Map::class.java)
+            val data = destringify(Gson().fromJson(json, Map::class.java))
             return Message(data as Map<String, Any>)
-        }
-
-        private fun stringify(value: Any?): Any? {
-            return when (value) {
-                is String -> value
-                is ByteArray -> String(value)
-                is Map<*, *> -> value.mapValues { stringify(it.value) }
-                else -> value
-            }
         }
 
         private fun destringify(value: Any?): Any? {
@@ -42,7 +35,7 @@ class Message(private val data: Map<String, Any>) {
     }
 
     fun encode(): ByteArray {
-        val json = Gson().toJson(stringify(data))
+        val json = Gson().toJson(data)
         return "$SEP$json$SEP".toByteArray(Charsets.UTF_8)
     }
 
@@ -61,7 +54,23 @@ fun sendMessage(data: Map<String, Any>, dataOutputStream: DataOutputStream) {
 }
 
 fun receiveMessage(dataInputStream: DataInputStream): Message {
-    val buffer = ByteArray(4096)
-    val bytesRead = dataInputStream.read(buffer)
-    return Message.decode(buffer.sliceArray(0 until bytesRead))
+    val bufferSize = 1024 * 1024
+    val buffer = ByteArray(bufferSize)
+    val byteOutputStream = ByteArrayOutputStream()
+
+    var bytesRead: Int
+    while (true) {
+        try {
+            bytesRead = dataInputStream.read(buffer)
+        } catch (e: SocketException) {
+            break
+        }
+        if (bytesRead == -1) {
+            // End of stream reached
+            break
+        }
+        byteOutputStream.write(buffer, 0, bytesRead)
+    }
+    val totalData = byteOutputStream.toByteArray()
+    return Message.decode(totalData)
 }
