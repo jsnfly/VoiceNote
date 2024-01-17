@@ -1,19 +1,22 @@
 import asyncio
 import time
-from concurrent.futures import ThreadPoolExecutor
-from base_server import SimplexServer
+from base_server import BaseServer, POLL_INTERVAL
 from utils.message import Message
 
 
-class ChatServer(SimplexServer):
+class ChatServer(BaseServer):
 
-    async def process(self) -> Message.DataDict:
-        loop = asyncio.get_running_loop()
-        with ThreadPoolExecutor() as pool:
-            await loop.run_in_executor(pool, self.dummy_generate)
+    async def handle_workload(self):
+        while True:
+            received = self.recv_from_client()
+            if not received:
+                await asyncio.sleep(POLL_INTERVAL)
+            else:
+                # TODO: handle multiple messages.
+                await self.run_blocking_function_in_thread(self.dummy_generate, [received[0]])
 
-    def dummy_generate(self):
-        for token in ["This", "is", "the", "response"]:
+    def dummy_generate(self, message: Message) -> None:
+        for token in f"You said: '{message['transcription']}'".split():
             time.sleep(0.5)
             self.send_to_client({"status": "RESPONDING", "token": token})
         self.send_to_client({"status": "FINISHED", "token": "."})
