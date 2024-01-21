@@ -2,18 +2,21 @@ import asyncio
 import time
 import websockets
 
-from base_server import BaseServer, POLL_INTERVAL
-from typing import List, Union
+from websockets.server import WebSocketServerProtocol
+from typing import List, Union, Callable
+
+from base_server import BaseServer, POLL_INTERVAL, StreamingConnectionHandler
 from utils.message import Message
 
 
-class TTSServer(BaseServer):
-    def __init__(self, host: str, port: int, chat_uri: Union[str, None] = None):
-        super().__init__(host, port)
-        self.received = []
-        self.chat_uri = chat_uri
+class STTHandler(StreamingConnectionHandler):
+    def __init__(self, connection: WebSocketServerProtocol, get_chat_response: Union[Callable, None]):
+        super().__init__(connection)
 
-    async def handle_workload(self) -> Message.DataDict:
+        self.received = []
+        self.get_chat_rsponse = get_chat_response
+
+    async def _handle_workload(self) -> Message.DataDict:
         while True:
             end_idx = self._get_end_idx()
             if end_idx == -1:
@@ -22,10 +25,10 @@ class TTSServer(BaseServer):
             else:
                 messages = self.received[:end_idx + 1]
                 self.received = self.received[end_idx + 1:]
-                transcription = await self.run_blocking_function_in_thread(self.dummy_transcribe, [messages])
+                transcription = await BaseServer.run_blocking_function_in_thread(self.dummy_transcribe, [messages])
                 result = {"status": "FINISHED", "transcription": transcription}
-                if self.chat_uri is not None:
-                    async for msg in self._get_chat_response(result):
+                if self.get_chat_rsponse is not None:
+                    async for msg in self.get_chat_rsponse(result):
                         self.send_to_client(msg)
                 else:
                     self.send_to_client(result)
@@ -37,7 +40,17 @@ class TTSServer(BaseServer):
         time.sleep(1)
         return b''.join([msg["audio"] for msg in messages]).decode()
 
-    async def _get_chat_response(self, msg: Message.DataDict) -> None:
+
+class STTServer(BaseServer):
+    def __init__(self, host: str, port: int, chat_uri: Union[str, None] = None):
+        super().__init__(host, port, STTHandler)
+        self.chat_uri = chat_uri
+
+    async def handle_connection(self, connection: WebSocketServerProtocol) -> None:
+        print(f"Connection from {connection.remote_address}")
+        await self.handler_cls(connection, self.get_chat_response).run()
+
+    async def get_chat_response(self, msg: Message.DataDict) -> None:
         async with websockets.connect(self.chat_uri) as chat_websocket:
             await chat_websocket.send(Message(msg).encode())
             while True:
@@ -48,4 +61,4 @@ class TTSServer(BaseServer):
 
 
 if __name__ == '__main__':
-    asyncio.run(TTSServer('0.0.0.0', '12345', 'ws://localhost:12346').serve_forever())
+    asyncio.run(STTServer('0.0.0.0', '12345', 'ws://localhost:12346').serve_forever())

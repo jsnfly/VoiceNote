@@ -6,7 +6,7 @@ from typing import Dict, Union
 # TODO: should this be a class?
 class Message:
 
-    # Define a recursive types.
+    # Define recursive types.
     DataValue = Union[str, bytes, "DataDict"]
     DataDict = Dict[str, DataValue]
     EncodedValue = Union[str, "EncodedDict"]
