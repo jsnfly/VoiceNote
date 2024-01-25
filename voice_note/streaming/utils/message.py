@@ -28,7 +28,7 @@ class Message:
         transformed = {}
         for key, val in data.items():
             if isinstance(val, dict):
-                transformed[key] = self._stringify(val)
+                transformed[key] = self._stringify_values(val)
             elif isinstance(val, bytes):
                 transformed[key + '_base64'] = base64.b64encode(val).decode()
             else:
@@ -48,7 +48,7 @@ class Message:
         transformed = {}
         for key, val in encoded_data.items():
             if isinstance(val, dict):
-                transformed[key] = cls._destringify(val)
+                transformed[key] = cls._destringify_values(val)
             elif key.endswith('_base64'):
                 transformed[key.removesuffix('_base64')] = base64.b64decode(val)
             else:
