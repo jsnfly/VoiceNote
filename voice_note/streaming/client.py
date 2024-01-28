@@ -46,7 +46,7 @@ async def stop_recording(connection, stream, message_field):
         if messages:
             message_field.update(message_field.get() + ''.join([msg['text'] for msg in messages]))
             if any(msg['status'] == 'FINISHED' for msg in messages):
-                break
+                return messages[-1]['save_path']
         else:
             await asyncio.sleep(POLL_INTERVAL)
 
@@ -97,8 +97,15 @@ async def ui(window, connection):
                 window['message'].update('')
         elif event == sg.TIMEOUT_EVENT:
             if window['status'].get() == 'RECORDING':
-                await stop_recording(connection, rec_stream, window['message'])
+                save_path = await stop_recording(connection, rec_stream, window['message'])
                 window['status'].update('STOPPED')
+                window['Delete'].update(disabled=False)
+                window['Wrong'].update(disabled=False)
+        elif event in ['Delete', 'Wrong']:
+            connection.send({'action': event.upper(), 'save_path': save_path, 'status': 'ACTION'})
+            if event == 'Delete':
+                window['Delete'].update(disabled=True)
+                window['Wrong'].update(disabled=True)
 
 if __name__ == '__main__':
     elements = [
