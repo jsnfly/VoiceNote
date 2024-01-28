@@ -25,24 +25,27 @@ class STTServer(BaseServer):
 
     async def _handle_workload(self, connection: StreamingConnection) -> Message.DataDict:
         while True:
-            end_idx = self._get_end_idx()
-            if end_idx == -1:
-                self.received += connection.recv()
-                await asyncio.sleep(POLL_INTERVAL)
-            else:
-                messages = self.received[:end_idx + 1]
-                self.received = self.received[end_idx + 1:]
-
-                assert messages[0]['status'] == 'INITIALIZING'
-                audio_config = messages[0]['audio_config']
-                bytes_ = b''.join([msg.get('audio', b'') for msg in messages])
-
-                transcription = await self.run_blocking_function_in_thread(self.transcribe, [bytes_, audio_config])
-                result = {"status": "FINISHED", "text": transcription}
-                if self.chat_uri is not None:
-                    pass
+            try:
+                end_idx = self._get_end_idx()
+                if end_idx == -1:
+                    self.received += connection.recv()
+                    await asyncio.sleep(POLL_INTERVAL)
                 else:
-                    connection.send(result)
+                    messages = self.received[:end_idx + 1]
+                    self.received = self.received[end_idx + 1:]
+
+                    assert messages[0]['status'] == 'INITIALIZING'
+                    audio_config = messages[0]['audio_config']
+                    bytes_ = b''.join([msg.get('audio', b'') for msg in messages])
+
+                    transcription = await self.run_blocking_function_in_thread(self.transcribe, [bytes_, audio_config])
+                    result = {"status": "FINISHED", "text": transcription}
+                    if self.chat_uri is not None:
+                        pass
+                    else:
+                        connection.send(result)
+            except ConnectionError:
+                break
 
     def transcribe(self, bytes_: bytes, audio_config: Dict):
         sample = Sample([bytes_], AudioConfig(**audio_config))

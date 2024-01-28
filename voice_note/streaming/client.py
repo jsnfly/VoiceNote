@@ -67,23 +67,34 @@ def get_audio_config(input_device_index):
 
 async def main(window):
     uri = 'ws://localhost:12345'
-    async with websockets.connect(uri) as websocket:
-        connection = StreamingConnection(websocket)
-        await asyncio.wait([connection.run(), ui(window, connection)], return_when=asyncio.FIRST_COMPLETED)
+    while True:
+        try:
+            websocket = await websockets.connect(uri)
+            window['REC'].update(disabled=False)
+            print("Connected.")
+            break
+        except ConnectionRefusedError:
+            await asyncio.sleep(POLL_INTERVAL)
+
+    connection = StreamingConnection(websocket)
+    await asyncio.gather(connection.run(), ui(window, connection))
 
 
 async def ui(window, connection):
     while True:
         await asyncio.sleep(POLL_INTERVAL)
         event, values = window.read(timeout=0)
-        window['New Chat'].update(disabled=not values['chat_mode'])
 
         if event == sg.WIN_CLOSED:
+            await connection.close()
             break
-        elif event == 'REC':
+
+        window['New Chat'].update(disabled=not values['chat_mode'])
+        if event == 'REC':
             if window['status'].get() == 'STOPPED':
                 rec_stream = start_recording(connection, INPUT_DEVICE_INDEX, values)
                 window['status'].update('RECORDING')
+                window['message'].update('')
         elif event == sg.TIMEOUT_EVENT:
             if window['status'].get() == 'RECORDING':
                 await stop_recording(connection, rec_stream, window['message'])
@@ -91,7 +102,7 @@ async def ui(window, connection):
 
 if __name__ == '__main__':
     elements = [
-        [sg.RealtimeButton('REC', button_color='red')],
+        [sg.RealtimeButton('REC', button_color='red', disabled=True)],
         [sg.Text(text='STOPPED', key='status')],
         [sg.Text(text='', size=(40, 20), key='message', background_color='#262624')],
         [

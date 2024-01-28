@@ -19,7 +19,6 @@ class BaseServer:
         print(f"Connection from {connection.remote_address}")
         connection = StreamingConnection(connection)
         await asyncio.gather(connection.run(), self._handle_workload(connection))
-        await self.handler_cls(connection).run()
 
     @staticmethod
     async def run_blocking_function_in_thread(blocking_fn: Callable, fn_args: List[Any] = []) -> Any:
