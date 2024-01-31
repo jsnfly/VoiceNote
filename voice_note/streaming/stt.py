@@ -2,13 +2,13 @@ import asyncio
 import json
 import whisper
 from pathlib import Path
-from typing import Dict, Tuple, Union
+from typing import Dict, List, Tuple, Union
 
 from base_server import BaseServer
 from utils.audio import AudioConfig
 from utils.message import Message
 from utils.sample import Sample
-from utils.streaming_connection import POLL_INTERVAL, StreamingConnection
+from utils.streaming_connection import POLL_INTERVAL
 
 
 SAVE_DIR = Path(__file__).parent.resolve() / 'outputs'
@@ -21,26 +21,29 @@ class STTServer(BaseServer):
         self.model = whisper.load_model(WHISPER_MODEL, device='cuda')
         self.decoding_options = whisper.DecodingOptions()
 
-        self.received = []  # TODO: multiple connections
-        self.chat_uri = chat_uri
+        if chat_uri is not None:
+            self.connections = {'chat': chat_uri}
 
-    async def _handle_workload(self, connection: StreamingConnection) -> Message.DataDict:
+    async def _handle_workload(self) -> Message.DataDict:
+        received = []
+
         while True:
             try:
-                end_idx = self._get_end_idx()
+                end_idx = self._get_end_idx(received)
                 if end_idx == -1:
-                    new_messages = connection.recv()
+                    new_messages = self.connections['client'].recv()
                     for msg in new_messages:
                         action = msg.get('action')
                         if action == 'DELETE':
                             self.delete_entry(msg['save_path'])
                         elif action == 'WRONG':
                             self.add_to_metadata(msg['save_path'], {'transcription_error': True})
-                    self.received += new_messages
+                        else:
+                            received.append(msg)
                     await asyncio.sleep(POLL_INTERVAL)
                 else:
-                    messages = self.received[:end_idx + 1]
-                    self.received = self.received[end_idx + 1:]
+                    messages = received[:end_idx + 1]
+                    received = received[end_idx + 1:]
 
                     assert messages[0]['status'] == 'INITIALIZING'
                     bytes_ = b''.join([msg.get('audio', b'') for msg in messages])
@@ -49,15 +52,15 @@ class STTServer(BaseServer):
                         self.transcribe, [bytes_, messages[0]['audio_config'], messages[0]['topic']]
                     )
                     result = {'status': 'FINISHED', 'text': transcription, 'save_path': str(save_path)}
-                    if self.chat_uri is not None:
-                        pass
+                    if 'chat' in self.connections and messages[0]['chat_mode']:
+                        await self.get_chat_response(result)
                     else:
-                        connection.send(result)
+                        self.connections['client'].send(result)
             except ConnectionError:
                 break
 
-    def _get_end_idx(self) -> int:
-        return next((idx for idx, msg in enumerate(self.received) if msg['status'] == 'FINISHED'), -1)
+    def _get_end_idx(self, received: List[Message.DataDict]) -> int:
+        return next((idx for idx, msg in enumerate(received) if msg['status'] == 'FINISHED'), -1)
 
     @staticmethod
     def delete_entry(save_path: str) -> None:
@@ -94,15 +97,15 @@ class STTServer(BaseServer):
         print(sample.result.text)
         return sample.result.text, save_path
 
-    # async def get_chat_response(self, msg: Message.DataDict) -> None:
-    #     async with websockets.connect(self.chat_uri) as chat_websocket:
-    #         await chat_websocket.send(Message(msg).encode())
-    #         while True:
-    #             response = Message.decode(await chat_websocket.recv())
-    #             yield response
-    #             if response["status"] == "FINISHED":
-    #                 break
+    async def get_chat_response(self, transcription_result: Message.DataDict) -> None:
+        self.connections['chat'].send(transcription_result)
+        while True:
+            for msg in self.connections['chat'].recv():
+                self.connections['client'].send(msg | {'save_path': transcription_result['save_path']})
+                if msg["status"] == "FINISHED":
+                    return
+            await asyncio.sleep(POLL_INTERVAL)
 
 
 if __name__ == '__main__':
-    asyncio.run(STTServer('0.0.0.0', '12345', None).serve_forever())
+    asyncio.run(STTServer('0.0.0.0', '12345', 'ws://localhost:12346').serve_forever())

@@ -37,18 +37,11 @@ def start_recording(connection, input_device_index, values):
     return stream
 
 
-async def stop_recording(connection, stream, message_field):
+def stop_recording(connection, stream):
     stream.stop_stream()
     stream.close()
     connection.send({'status': 'FINISHED', 'audio': b''})
-    while True:
-        messages = connection.recv()
-        if messages:
-            message_field.update(message_field.get() + ''.join([msg['text'] for msg in messages]))
-            if any(msg['status'] == 'FINISHED' for msg in messages):
-                return messages[-1]['save_path']
-        else:
-            await asyncio.sleep(POLL_INTERVAL)
+    return None
 
 
 @lru_cache(maxsize=1)
@@ -97,15 +90,23 @@ async def ui(window, connection):
                 window['message'].update('')
         elif event == sg.TIMEOUT_EVENT:
             if window['status'].get() == 'RECORDING':
-                save_path = await stop_recording(connection, rec_stream, window['message'])
-                window['status'].update('STOPPED')
-                window['Delete'].update(disabled=False)
-                window['Wrong'].update(disabled=False)
+                if rec_stream is not None:
+                    rec_stream = stop_recording(connection, rec_stream)
+
+                messages = connection.recv()
+                if messages:
+                    window['message'].update(window['message'].get() + ''.join([msg['text'] for msg in messages]))
+                    if any(msg['status'] == 'FINISHED' for msg in messages):
+                        save_path = messages[-1]['save_path']
+                        window['status'].update('STOPPED')
+                        window['Delete'].update(disabled=False)
+                        window['Wrong'].update(disabled=False)
         elif event in ['Delete', 'Wrong']:
             connection.send({'action': event.upper(), 'save_path': save_path, 'status': 'ACTION'})
             if event == 'Delete':
                 window['Delete'].update(disabled=True)
                 window['Wrong'].update(disabled=True)
+                window['message'].update('')
 
 if __name__ == '__main__':
     elements = [
