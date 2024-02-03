@@ -1,40 +1,28 @@
+import asyncio
 import pyaudio
-import socket
-import time
 import PySimpleGUI as sg
+import websockets
 from functools import lru_cache
 from utils.audio import audio
-from utils.message import recv_message, send_message
+from utils.streaming_connection import StreamingConnection, POLL_INTERVAL
 
-HOST = '0.0.0.0'
-PORT = 12345
 INPUT_DEVICE_INDEX = None
 AUDIO_FORMAT = pyaudio.paInt16  # https://en.wikipedia.org/wiki/Audio_bit_depth,
 NUM_CHANNELS = 1  # Number of audio channels
 
 
-def setup_connection(host, port):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    while True:
-        try:
-            sock.connect((host, port))
-            break
-        except ConnectionRefusedError:
-            time.sleep(0.1)
-    return sock
-
-
-def start_recording(sock, input_device_index, values):
+def start_recording(connection, input_device_index, values):
     msg = {
         'audio_config': get_audio_config(input_device_index),
-        'chat_mode': values["chat_mode"],
-        'topic': values["topic"]
+        'chat_mode': values['chat_mode'],
+        'status': 'INITIALIZING',
+        'topic': values['topic']
     }
-    send_message(msg, sock)
+    connection.send(msg)
 
     def _callback(in_data, *args):
         try:
-            sock.sendall(in_data)
+            connection.send({'status': 'RECORDING', 'audio': in_data})
             return None, pyaudio.paContinue
         except BrokenPipeError:
             return None, pyaudio.paComplete
@@ -47,6 +35,13 @@ def start_recording(sock, input_device_index, values):
         stream_callback=_callback
     )
     return stream
+
+
+def stop_recording(connection, stream):
+    stream.stop_stream()
+    stream.close()
+    connection.send({'status': 'FINISHED', 'audio': b''})
+    return None
 
 
 @lru_cache(maxsize=1)
@@ -63,111 +58,69 @@ def get_audio_config(input_device_index):
     }
 
 
-def stop_recording(sock, stream):
-    stream.stop_stream()
-    stream.close()
-
-    sock.shutdown(1)
-    msg = recv_message(sock)
-    sock.close()
-    return msg.data
-
-
-def single_message(msg):
-    sock = setup_connection(HOST, PORT)
-    send_message(msg, sock)
-    sock.close()
-
-
-def start_playback(audio_dict):
-    config = audio_dict['audio_config']
-    data = audio_dict['data']
-
-    pointer = 0
-    bytes_per_sample = audio.get_sample_size(config['format'])
-
-    def _callback(_, frame_count, *args):
-        nonlocal pointer
-
-        end_pointer = pointer + frame_count * config['channels'] * bytes_per_sample
-        chunk = data[pointer:end_pointer]
-        pointer = end_pointer
-        return chunk, pyaudio.paContinue
-
-    stream = audio.open(
-        format=config['format'],
-        channels=config['channels'],
-        rate=config['rate'],
-        output=True,
-        stream_callback=_callback
-    )
-
-    return stream
-
-
-def stop_playback(stream):
-    try:
-        if stream is None or stream.is_stopped():
-            return
-    except OSError:
-        return
-    stream.stop_stream()
-    stream.close()
-
-
-if __name__ == "__main__":
-    sock = rec_stream = play_stream = response = None
-
-    elements = [
-        [sg.RealtimeButton("REC", button_color="red")],
-        [sg.Text(text="STOPPED", key="status")],
-        [sg.Text(text="", size=(40, 20), key="message", background_color='#262624')],
-        [
-            sg.Button(button_text="Delete", disabled=True),
-            sg.Button(button_text="Wrong", disabled=True),
-            sg.Button(button_text="New Chat", disabled=True)
-        ],
-        [sg.Text(text="Topic:"), sg.Input(default_text="misc", size=(16, 1), key="topic")],
-        [sg.Checkbox("Chat Mode", key="chat_mode")]
-    ]
-    window = sg.Window("Voice Note Client", elements, size=(400, 750), element_justification="c", finalize=True)
+async def main(window):
+    uri = 'ws://localhost:12345'
     while True:
-        event, values = window.read(timeout=100)
+        try:
+            websocket = await websockets.connect(uri)
+            window['REC'].update(disabled=False)
+            print("Connected.")
+            break
+        except ConnectionRefusedError:
+            await asyncio.sleep(POLL_INTERVAL)
+
+    connection = StreamingConnection(websocket)
+    await asyncio.gather(connection.run(), ui(window, connection))
+
+
+async def ui(window, connection):
+    while True:
+        await asyncio.sleep(POLL_INTERVAL)
+        event, values = window.read(timeout=0)
+
         if event == sg.WIN_CLOSED:
+            await connection.close()
             break
 
-        if values["chat_mode"]:
-            window["New Chat"].update(disabled=False)
-        else:
-            window["New Chat"].update(disabled=True)
+        window['New Chat'].update(disabled=not values['chat_mode'])
+        if event == 'REC':
+            if window['status'].get() == 'STOPPED':
+                rec_stream = start_recording(connection, INPUT_DEVICE_INDEX, values)
+                window['status'].update('RECORDING')
+                window['message'].update('')
+        elif event == sg.TIMEOUT_EVENT:
+            if window['status'].get() == 'RECORDING':
+                if rec_stream is not None:
+                    rec_stream = stop_recording(connection, rec_stream)
 
-        if event == sg.TIMEOUT_EVENT:
-            if window["status"].get() == "RECORDING":
-                response = stop_recording(sock, rec_stream)
-                window["message"].update(response["text"])
-                window["Delete"].update(disabled=False)
-                window["Wrong"].update(disabled=False)
-                if values["chat_mode"]:
-                    play_stream = start_playback(response["audio"])
-            window["status"].update("STOPPED")
-        elif event == 'Delete':
-            stop_playback(play_stream)
-            single_message({'action': 'delete', 'save_path': response['save_path']})
-            window["Delete"].update(disabled=True)
-            window["Wrong"].update(disabled=True)
-            window["message"].update("")
-        elif event == 'Wrong':
-            stop_playback(play_stream)
-            single_message({'action': 'wrong', 'save_path': response['save_path']})
-            window["Delete"].update(disabled=True)
-            window["Wrong"].update(disabled=True)
-        elif event == "New Chat":
-            single_message({'action': 'new_chat'})
-            window["message"].update("")
-        else:
-            if window["status"].get() == "STOPPED":
-                stop_playback(play_stream)
-                window["status"].update("CONNECTING...")
-                sock = setup_connection(HOST, PORT)
-                rec_stream = start_recording(sock, INPUT_DEVICE_INDEX, values)
-            window["status"].update("RECORDING")
+                messages = connection.recv()
+                if messages:
+                    window['message'].update(window['message'].get() + ''.join([msg['text'] for msg in messages]))
+                    if any(msg['status'] == 'FINISHED' for msg in messages):
+                        save_path = messages[-1]['save_path']
+                        window['status'].update('STOPPED')
+                        window['Delete'].update(disabled=False)
+                        window['Wrong'].update(disabled=False)
+        elif event in ['Delete', 'Wrong']:
+            connection.send({'action': event.upper(), 'save_path': save_path, 'status': 'ACTION'})
+            if event == 'Delete':
+                window['Delete'].update(disabled=True)
+                window['Wrong'].update(disabled=True)
+                window['message'].update('')
+
+if __name__ == '__main__':
+    elements = [
+        [sg.RealtimeButton('REC', button_color='red', disabled=True)],
+        [sg.Text(text='STOPPED', key='status')],
+        [sg.Text(text='', size=(40, 20), key='message', background_color='#262624')],
+        [
+            sg.Button(button_text='Delete', disabled=True),
+            sg.Button(button_text='Wrong', disabled=True),
+            sg.Button(button_text='New Chat', disabled=True)
+        ],
+        [sg.Text(text='Topic:'), sg.Input(default_text='misc', size=(16, 1), key='topic')],
+        [sg.Checkbox('Chat Mode', key='chat_mode')]
+    ]
+    window = sg.Window('Voice Note Client', elements, size=(400, 750), element_justification='c', finalize=True)
+
+    asyncio.run(main(window))
