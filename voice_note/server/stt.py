@@ -4,7 +4,7 @@ import whisper
 from pathlib import Path
 from typing import Dict, List, Tuple, Union
 
-from base_server import BaseServer
+from server.base_server import BaseServer
 from utils.audio import AudioConfig
 from utils.message import Message
 from utils.sample import Sample
