@@ -1,6 +1,6 @@
-
 **.ipynb_checkpoints
 .vscode
 voice_note/outputs
 
 *__pycache__*
+models

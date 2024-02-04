@@ -1,0 +1,3 @@
+PyAudio==0.2.14
+openai-whisper==20231117
+torchaudio==2.2.0

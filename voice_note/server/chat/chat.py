@@ -3,9 +3,9 @@ from functools import partial
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextStreamer
 
 from server.base_server import BaseServer
-from utils.streaming_connection import POLL_INTERVAL, StreamingConnection
+from server.utils.streaming_connection import POLL_INTERVAL, StreamingConnection
 
-CHAT_MODEL = "./models/openchat_3.5"
+CHAT_MODEL = "./models/chat/openchat_3.5"
 
 
 class Streamer(TextStreamer):

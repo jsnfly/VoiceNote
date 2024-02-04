@@ -3,8 +3,8 @@ import pyaudio
 import PySimpleGUI as sg
 import websockets
 from functools import lru_cache
-from utils.audio import audio
-from utils.streaming_connection import StreamingConnection, POLL_INTERVAL
+from server.utils.audio import audio
+from server.utils.streaming_connection import StreamingConnection, POLL_INTERVAL
 
 INPUT_DEVICE_INDEX = None
 AUDIO_FORMAT = pyaudio.paInt16  # https://en.wikipedia.org/wiki/Audio_bit_depth,

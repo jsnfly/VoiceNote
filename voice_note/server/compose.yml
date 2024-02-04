@@ -1,0 +1,45 @@
+version: '2'
+
+services:
+
+  stt:
+    build:
+      context: .
+      dockerfile: stt/Dockerfile
+    container_name: voice_note_stt
+    ports:
+      - 12345:12345
+    volumes:
+      - ../models/whisper:/usr/src/app/models/whisper:ro
+      - ../outputs:/usr/src/app/outputs
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+    networks:
+      - voice_note_net
+
+  chat:
+    build:
+      context: .
+      dockerfile: chat/Dockerfile
+    container_name: chat_note_stt
+    volumes:
+      - ../models/chat:/usr/src/app/models/chat:ro
+    expose:
+      - 12346
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+    networks:
+      - voice_note_net
+
+networks:
+  voice_note_net:

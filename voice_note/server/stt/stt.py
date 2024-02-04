@@ -5,20 +5,22 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Union
 
 from server.base_server import BaseServer
-from utils.audio import AudioConfig
-from utils.message import Message
-from utils.sample import Sample
-from utils.streaming_connection import POLL_INTERVAL
+from server.utils.audio import AudioConfig
+from server.utils.message import Message
+from server.utils.sample import Sample
+from server.utils.streaming_connection import POLL_INTERVAL
 
+BASE_DIR = (Path(__file__).parent / '../../').resolve()
+SAVE_DIR = BASE_DIR / 'outputs'
+MODEL_DIR = BASE_DIR / 'models/whisper'
 
-SAVE_DIR = Path(__file__).parent.resolve() / 'outputs'
 WHISPER_MODEL = 'medium'
 
 
 class STTServer(BaseServer):
     def __init__(self, host: str, port: int, chat_uri: Union[str, None] = None):
         super().__init__(host, port)
-        self.model = whisper.load_model(WHISPER_MODEL, device='cuda')
+        self.model = whisper.load_model(WHISPER_MODEL, device='cuda', download_root=str(MODEL_DIR))
         self.decoding_options = whisper.DecodingOptions()
 
         if chat_uri is not None:
@@ -108,4 +110,4 @@ class STTServer(BaseServer):
 
 
 if __name__ == '__main__':
-    asyncio.run(STTServer('0.0.0.0', '12345', 'ws://localhost:12346').serve_forever())
+    asyncio.run(STTServer('0.0.0.0', '12345', 'ws://chat:12346').serve_forever())

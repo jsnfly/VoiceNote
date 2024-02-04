@@ -5,7 +5,7 @@ from websockets.client import WebSocketClientProtocol
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 from queue import SimpleQueue, Empty
 from typing import List, Union
-from utils.message import Message
+from server.utils.message import Message
 
 POLL_INTERVAL = 0.05  # Seconds
 

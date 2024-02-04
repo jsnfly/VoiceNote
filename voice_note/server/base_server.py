@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from websockets.server import serve, WebSocketServerProtocol
 from typing import Any, Callable, List
 
-from utils.streaming_connection import POLL_INTERVAL, StreamingConnection
+from server.utils.streaming_connection import POLL_INTERVAL, StreamingConnection
 
 
 class BaseServer:
