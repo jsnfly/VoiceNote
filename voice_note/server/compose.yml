@@ -12,6 +12,7 @@ services:
     volumes:
       - ../models/whisper:/usr/src/app/models/whisper:ro
       - ../outputs:/usr/src/app/outputs
+    user: "1000:1000"  # Same user as on host, so he created files have the same owner.
     deploy:
       resources:
         reservations:
@@ -26,11 +27,30 @@ services:
     build:
       context: .
       dockerfile: chat/Dockerfile
-    container_name: chat_note_stt
+    container_name: voice_note_chat
     volumes:
       - ../models/chat:/usr/src/app/models/chat:ro
     expose:
       - 12346
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+    networks:
+      - voice_note_net
+
+  tts:
+    build:
+      context: .
+      dockerfile: tts/Dockerfile
+    container_name: voice_note_tts
+    volumes:
+      - ../models/xtts:/usr/src/app/models/xtts:ro
+    expose:
+      - 12347
     deploy:
       resources:
         reservations:

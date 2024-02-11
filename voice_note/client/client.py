@@ -37,6 +37,16 @@ def start_recording(connection, input_device_index, values):
     return stream
 
 
+def start_playback(config, callback):
+    return audio.open(
+        format=config['format'],
+        channels=config['channels'],
+        rate=config['rate'],
+        output=True,
+        stream_callback=callback
+    )
+
+
 def stop_recording(connection, stream):
     stream.stop_stream()
     stream.close()
@@ -74,6 +84,8 @@ async def main(window):
 
 
 async def ui(window, connection):
+    received_bytes = b''
+    playback_stream = None
     while True:
         await asyncio.sleep(POLL_INTERVAL)
         event, values = window.read(timeout=0)
@@ -81,6 +93,11 @@ async def ui(window, connection):
         if event == sg.WIN_CLOSED:
             await connection.close()
             break
+
+        # TODO: never True?
+        if playback_stream is not None and playback_stream.is_stopped():
+            playback_stream = None
+            received_bytes = b''
 
         window['New Chat'].update(disabled=not values['chat_mode'])
         if event == 'REC':
@@ -94,13 +111,30 @@ async def ui(window, connection):
                     rec_stream = stop_recording(connection, rec_stream)
 
                 messages = connection.recv()
-                if messages:
-                    window['message'].update(window['message'].get() + ''.join([msg['text'] for msg in messages]))
-                    if any(msg['status'] == 'FINISHED' for msg in messages):
-                        save_path = messages[-1]['save_path']
-                        window['status'].update('STOPPED')
-                        window['Delete'].update(disabled=False)
-                        window['Wrong'].update(disabled=False)
+                window['message'].update(window['message'].get() + ''.join([msg.get('text', '') for msg in messages]))
+
+                received_bytes = b''.join([received_bytes, *[msg.get('audio', b'') for msg in messages]])
+
+                if received_bytes and playback_stream is None:
+                    pointer = 0
+                    config = next(msg for msg in messages if 'audio' in msg)['config']
+                    bytes_per_sample = audio.get_sample_size(config['format'])
+
+                    def _callback(_, frame_count, *args):
+                        nonlocal pointer
+
+                        end_pointer = pointer + frame_count * config['channels'] * bytes_per_sample
+                        chunk = received_bytes[pointer:end_pointer]
+                        pointer = end_pointer
+                        return chunk, pyaudio.paContinue
+
+                    playback_stream = start_playback(config, _callback)
+
+                if any(msg['status'] == 'FINISHED' for msg in messages):
+                    save_path = messages[-1]['save_path']
+                    window['status'].update('STOPPED')
+                    window['Delete'].update(disabled=False)
+                    window['Wrong'].update(disabled=False)
         elif event in ['Delete', 'Wrong']:
             connection.send({'action': event.upper(), 'save_path': save_path, 'status': 'ACTION'})
             if event == 'Delete':
