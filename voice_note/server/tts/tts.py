@@ -32,16 +32,20 @@ class TTSServer(BaseServer):
 
     async def _handle_workload(self) -> None:
         text = ''
+        finished_receiving = False
 
         while True:
             try:
-                new_messages = self.connections['client'].recv()
+                new_messages = self.streams['client'].recv()
+                if new_messages and new_messages[-1]['status'] == 'FINISHED':
+                    finished_receiving = True
+
                 text = ''.join([text, *[msg['text'] for msg in new_messages]])
                 parts = self.eos_rx.split(text)
                 if len(parts) > 1 and len(parts[0].split()) > 4:
                     current_sentence = parts[0] + parts[1]
                     text = ''.join(parts[2:])
-                elif new_messages and new_messages[-1]['status'] == 'FINISHED':
+                elif finished_receiving:
                     current_sentence = text
                     text = ''
                 else:
@@ -49,6 +53,7 @@ class TTSServer(BaseServer):
                     await asyncio.sleep(POLL_INTERVAL)
 
                 if current_sentence:
+                    print(current_sentence)
                     chunk_generator = self.model.inference_stream(
                         current_sentence, "de", self.gpt_cond_latent, self.speaker_embedding
                     )
@@ -58,14 +63,16 @@ class TTSServer(BaseServer):
                         chunk = await self.run_blocking_function_in_thread(lambda: next(chunk_generator, None), [])
 
                         if chunk is None:
-                            self.connections['client'].send({'audio': b'', 'status': 'FINISHED'})
                             break
 
-                        self.connections['client'].send({
+                        self.streams['client'].send({
                             'audio': np.array(chunk.cpu(), dtype=np.float32).tobytes(),
                             'status': 'GENERATING',
                             'config': self.audio_config
                         })
+                if finished_receiving and text == '':
+                    self.streams['client'].send({'audio': b'', 'status': 'FINISHED'})
+                    finished_receiving = False
 
             except ConnectionError:
                 break

@@ -38,6 +38,7 @@ def start_recording(connection, input_device_index, values):
 
 
 def start_playback(config, callback):
+    print('Starting playback.')
     return audio.open(
         format=config['format'],
         channels=config['channels'],
@@ -79,45 +80,57 @@ async def main(window):
         except ConnectionRefusedError:
             await asyncio.sleep(POLL_INTERVAL)
 
-    connection = StreamingConnection(websocket)
-    await asyncio.gather(connection.run(), ui(window, connection))
+    stream = StreamingConnection(websocket)
+    await asyncio.gather(stream.run(), ui(window, stream))
 
 
-async def ui(window, connection):
+async def ui(window, com_stream):
     received_bytes = b''
     playback_stream = None
+    audio_finished = False
+
     while True:
         await asyncio.sleep(POLL_INTERVAL)
         event, values = window.read(timeout=0)
 
         if event == sg.WIN_CLOSED:
-            await connection.close()
+            await com_stream.close()
             break
 
-        # TODO: never True?
-        if playback_stream is not None and playback_stream.is_stopped():
+        # .is_stopped returns False even if .is_active if False
+        if playback_stream is not None and not playback_stream.is_active():
             playback_stream = None
             received_bytes = b''
+            print('Finished Playback.')
 
         window['New Chat'].update(disabled=not values['chat_mode'])
         if event == 'REC':
             if window['status'].get() == 'STOPPED':
-                rec_stream = start_recording(connection, INPUT_DEVICE_INDEX, values)
+                rec_stream = start_recording(com_stream, INPUT_DEVICE_INDEX, values)
                 window['status'].update('RECORDING')
                 window['message'].update('')
         elif event == sg.TIMEOUT_EVENT:
             if window['status'].get() == 'RECORDING':
                 if rec_stream is not None:
-                    rec_stream = stop_recording(connection, rec_stream)
+                    rec_stream = stop_recording(com_stream, rec_stream)
 
-                messages = connection.recv()
-                window['message'].update(window['message'].get() + ''.join([msg.get('text', '') for msg in messages]))
+                audio_messages, text_messages = [], []
+                messages = com_stream.recv()
+                for msg in messages:
+                    if 'text' in msg:
+                        text_messages.append(msg)
+                    elif 'audio' in msg:
+                        audio_messages.append(msg)
+                    else:
+                        raise ValueError('Unknown message type.')
+                window['message'].update(window['message'].get() + ''.join([msg['text'] for msg in text_messages]))
 
-                received_bytes = b''.join([received_bytes, *[msg.get('audio', b'') for msg in messages]])
+                received_bytes = b''.join([received_bytes, *[msg['audio'] for msg in audio_messages]])
+                audio_finished = audio_messages and audio_messages[-1]['status'] == 'FINISHED'
 
                 if received_bytes and playback_stream is None:
                     pointer = 0
-                    config = next(msg for msg in messages if 'audio' in msg)['config']
+                    config = audio_messages[0]['config']
                     bytes_per_sample = audio.get_sample_size(config['format'])
 
                     def _callback(_, frame_count, *args):
@@ -126,7 +139,9 @@ async def ui(window, connection):
                         end_pointer = pointer + frame_count * config['channels'] * bytes_per_sample
                         chunk = received_bytes[pointer:end_pointer]
                         pointer = end_pointer
-                        return chunk, pyaudio.paContinue
+
+                        finished = audio_finished and pointer >= len(received_bytes)
+                        return chunk, pyaudio.paComplete if finished else pyaudio.paContinue
 
                     playback_stream = start_playback(config, _callback)
 
@@ -136,7 +151,7 @@ async def ui(window, connection):
                     window['Delete'].update(disabled=False)
                     window['Wrong'].update(disabled=False)
         elif event in ['Delete', 'Wrong']:
-            connection.send({'action': event.upper(), 'save_path': save_path, 'status': 'ACTION'})
+            com_stream.send({'action': event.upper(), 'save_path': save_path, 'status': 'ACTION'})
             if event == 'Delete':
                 window['Delete'].update(disabled=True)
                 window['Wrong'].update(disabled=True)

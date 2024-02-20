@@ -33,7 +33,7 @@ class STTServer(BaseServer):
             try:
                 end_idx = self._get_end_idx(received)
                 if end_idx == -1:
-                    new_messages = self.connections['client'].recv()
+                    new_messages = self.streams['client'].recv()
                     for msg in new_messages:
                         action = msg.get('action')
                         if action == 'DELETE':
@@ -54,10 +54,10 @@ class STTServer(BaseServer):
                         self.transcribe, [bytes_, messages[0]['audio_config'], messages[0]['topic']]
                     )
                     result = {'status': 'FINISHED', 'text': transcription, 'save_path': str(save_path)}
-                    if 'chat' in self.connections and messages[0]['chat_mode']:
+                    if 'chat' in self.streams and messages[0]['chat_mode']:
                         await self.get_chat_response(result)
                     else:
-                        self.connections['client'].send(result)
+                        self.streams['client'].send(result)
             except ConnectionError:
                 break
 
@@ -100,14 +100,14 @@ class STTServer(BaseServer):
         return sample.result.text, save_path
 
     async def get_chat_response(self, transcription_result: Message.DataDict) -> None:
-        self.connections['chat'].send(transcription_result)
+        self.streams['chat'].send(transcription_result)
         while True:
-            for msg in self.connections['chat'].recv():
-                self.connections['client'].send(msg | {'save_path': transcription_result['save_path']})
+            for msg in self.streams['chat'].recv():
+                self.streams['client'].send(msg | {'save_path': transcription_result['save_path']})
                 if msg["status"] == "FINISHED":
                     return
             await asyncio.sleep(POLL_INTERVAL)
 
 
 if __name__ == '__main__':
-    asyncio.run(STTServer('0.0.0.0', '12345', 'ws://chat:12346').serve_forever())
+    asyncio.run(STTServer('0.0.0.0', '12345', 'ws://localhost:12346').serve_forever())

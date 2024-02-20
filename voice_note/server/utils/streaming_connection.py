@@ -7,12 +7,12 @@ from queue import SimpleQueue, Empty
 from typing import List, Union
 from server.utils.message import Message
 
-POLL_INTERVAL = 0.05  # Seconds
+POLL_INTERVAL = 0.005  # Seconds
 
 
 class StreamingConnection:
-    def __init__(self, connection: Union[WebSocketClientProtocol, WebSocketServerProtocol]):
-        self.connection = connection
+    def __init__(self, connection: Union['StreamingConnection', WebSocketClientProtocol, WebSocketServerProtocol]):
+        self.connection = connection.connection if isinstance(connection, StreamingConnection) else connection
         self.received_q = SimpleQueue()
         self.ready_to_send_q = SimpleQueue()
         self.closed = False

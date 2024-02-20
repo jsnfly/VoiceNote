@@ -11,7 +11,7 @@ class BaseServer:
     def __init__(self, host: str, port: int):
         self.host = host
         self.port = port
-        self.connections = {}  # Connections to other servers.
+        self.connections = {}  # Connection URIs to other servers.
 
     async def serve_forever(self) -> None:
         async with serve(self.handle_connection, self.host, self.port):
@@ -19,21 +19,28 @@ class BaseServer:
 
     async def handle_connection(self, client_connection: WebSocketServerProtocol) -> None:
         print(f"Connection from {client_connection.remote_address}")
-        self.connections['client'] = client_connection
-        await self._setup_connections()
-        await asyncio.gather(*[conn.run() for conn in self.connections.values()], self._handle_workload())
+        self.streams = {}
+        for key, uri in self.connections.items():
+            self.streams[key] = await self.setup_connection(uri)
+        self.streams['client'] = StreamingConnection(client_connection)
 
-    async def _setup_connections(self) -> None:
-        for key, connection in self.connections.items():
-            if isinstance(connection, str):
-                while True:
-                    try:
-                        connection = await websockets.connect(connection)
-                        break
-                    except ConnectionRefusedError:
-                        await asyncio.sleep(POLL_INTERVAL)
+        _, pending = await asyncio.wait(self._create_tasks(), return_when=asyncio.FIRST_COMPLETED)
+        StreamingConnection.cancel_tasks(pending)
+        self.streams = {}
 
-            self.connections[key] = StreamingConnection(connection)
+    @staticmethod
+    async def setup_connection(uri: str) -> StreamingConnection:
+        while True:
+            try:
+                connection = await websockets.connect(uri)
+                break
+            except ConnectionRefusedError:
+                await asyncio.sleep(POLL_INTERVAL)
+        return StreamingConnection(connection)
+
+    def _create_tasks(self) -> List[asyncio.Task]:
+        streaming_tasks = [asyncio.create_task(stream.run(), name=key) for key, stream in self.streams.items()]
+        return streaming_tasks + [asyncio.create_task(self._handle_workload())]
 
     @staticmethod
     async def run_blocking_function_in_thread(blocking_fn: Callable, fn_args: List[Any] = []) -> Any:
