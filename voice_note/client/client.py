@@ -150,9 +150,9 @@ async def ui(window, com_stream):
                     window['status'].update('STOPPED')
                     window['Delete'].update(disabled=False)
                     window['Wrong'].update(disabled=False)
-        elif event in ['Delete', 'Wrong']:
+        elif event in ['Delete', 'Wrong', 'New Chat']:
             com_stream.send({'action': event.upper(), 'save_path': save_path, 'status': 'ACTION'})
-            if event == 'Delete':
+            if event != 'Wrong':
                 window['Delete'].update(disabled=True)
                 window['Wrong'].update(disabled=True)
                 window['message'].update('')

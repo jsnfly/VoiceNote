@@ -40,6 +40,8 @@ class STTServer(BaseServer):
                             self.delete_entry(msg['save_path'])
                         elif action == 'WRONG':
                             self.add_to_metadata(msg['save_path'], {'transcription_error': True})
+                        elif action == 'NEW CHAT':
+                            self.streams['chat'].send(msg)
                         else:
                             received.append(msg)
                     await asyncio.sleep(POLL_INTERVAL)

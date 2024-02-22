@@ -18,8 +18,11 @@ class Streamer(TextStreamer):
     ):
         super().__init__(tokenizer, skip_prompt, **decode_kwargs)
         self.streams = streams
+        self.result = ''
 
     def on_finalized_text(self, text: str, stream_end: bool = False):
+        self.result += text
+
         if 'tts' in self.streams:
             self.streams['tts'].send({'status': 'FINISHED' if stream_end else 'GENERATING', 'text': text})
             self.streams['client'].send({'status': 'GENERATING', 'text': text})
@@ -44,26 +47,31 @@ class ChatServer(BaseServer):
     async def _handle_workload(self) -> None:
         received = []
 
+        history = [
+            {'role': 'system', 'content': self.system_prompt}
+        ]
+
         while True:
             try:
                 while len(received) == 0:
-                    received += self.streams['client'].recv()
+                    for msg in self.streams['client'].recv():
+                        if msg.get('action') == 'NEW CHAT':
+                            history = history[:1]
+                        else:
+                            received.append(msg)
                     await asyncio.sleep(POLL_INTERVAL)
 
-                # TODO: history
-                messages = [
-                    {'role': 'system', 'content': self.system_prompt},
-                    {'role': 'user', 'content': received.pop(0)['text']}
-                ]
+                history.append({'role': 'user', 'content': received.pop(0)['text']})
 
                 generation_config = self.model.generation_config
                 generation_config.max_length = 2048
 
-                inputs = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, return_tensors='pt')
+                inputs = self.tokenizer.apply_chat_template(history, add_generation_prompt=True, return_tensors='pt')
                 streamer = Streamer(self.streams, self.tokenizer, skip_prompt=True, skip_special_tokens=True)
                 await self.run_blocking_function_in_thread(
                     partial(self.model.generate, inputs.cuda(), generation_config, streamer=streamer)
                 )
+                history.append({'role': 'assistant', 'content': streamer.result})
 
                 waiting_for_tts = 'tts' in self.streams
                 while waiting_for_tts:
