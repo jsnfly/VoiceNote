@@ -37,21 +37,39 @@ def start_recording(connection, input_device_index, values):
     return stream
 
 
-def start_playback(config, callback):
-    print('Starting playback.')
-    return audio.open(
-        format=config['format'],
-        channels=config['channels'],
-        rate=config['rate'],
-        output=True,
-        stream_callback=callback
-    )
-
-
 def stop_recording(connection, stream):
     stream.stop_stream()
     stream.close()
     connection.send({'status': 'FINISHED', 'audio': b''})
+    return None
+
+
+def start_playback(config, data):
+    pointer = 0
+    bytes_per_sample = audio.get_sample_size(config['format'])
+
+    def _callback(_, frame_count, *args):
+        nonlocal pointer
+
+        end_pointer = pointer + frame_count * config['channels'] * bytes_per_sample
+        chunk = data[pointer:end_pointer]
+        pointer = end_pointer
+
+        return chunk, pyaudio.paContinue
+
+    stream = audio.open(
+        format=config['format'],
+        channels=config['channels'],
+        rate=config['rate'],
+        output=True,
+        stream_callback=_callback
+    )
+    return stream
+
+
+def stop_playback(stream):
+    stream.stop_stream()
+    stream.close()
     return None
 
 
@@ -85,9 +103,8 @@ async def main(window):
 
 
 async def ui(window, com_stream):
-    received_bytes = b''
-    playback_stream = None
-    audio_finished = False
+    rec_stream = playback_stream = playback_config = save_path = None
+    playback_bytes = b''
 
     while True:
         await asyncio.sleep(POLL_INTERVAL)
@@ -97,59 +114,54 @@ async def ui(window, com_stream):
             await com_stream.close()
             break
 
-        # .is_stopped returns False even if .is_active if False
-        if playback_stream is not None and not playback_stream.is_active():
-            playback_stream = None
-            received_bytes = b''
-            print('Finished Playback.')
-
         window['New Chat'].update(disabled=not values['chat_mode'])
         if event == 'REC':
             if window['status'].get() == 'STOPPED':
                 rec_stream = start_recording(com_stream, INPUT_DEVICE_INDEX, values)
+                playback_bytes = b''
+
+                if playback_stream is not None:
+                    playback_stream = stop_playback(playback_stream)
+
                 window['status'].update('RECORDING')
                 window['message'].update('')
         elif event == sg.TIMEOUT_EVENT:
-            if window['status'].get() == 'RECORDING':
-                if rec_stream is not None:
-                    rec_stream = stop_recording(com_stream, rec_stream)
+            window['status'].update('STOPPED')
+            if rec_stream is not None:
+                rec_stream = stop_recording(com_stream, rec_stream)
+                window['Delete'].update(disabled=False)
+                window['Wrong'].update(disabled=False)
 
-                audio_messages, text_messages = [], []
-                messages = com_stream.recv()
-                for msg in messages:
-                    if 'text' in msg:
-                        text_messages.append(msg)
-                    elif 'audio' in msg:
-                        audio_messages.append(msg)
-                    else:
-                        raise ValueError('Unknown message type.')
-                window['message'].update(window['message'].get() + ''.join([msg['text'] for msg in text_messages]))
+            audio_messages, text_messages = [], []
+            messages = com_stream.recv()
+            for msg in messages:
+                if 'text' in msg:
+                    text_messages.append(msg)
+                elif 'audio' in msg:
+                    if 'config' in msg:
+                        playback_config = msg['config']
+                    audio_messages.append(msg)
+                else:
+                    raise ValueError('Unknown message type.')
+            window['message'].update(window['message'].get() + ''.join([msg['text'] for msg in text_messages]))
 
-                received_bytes = b''.join([received_bytes, *[msg['audio'] for msg in audio_messages]])
-                audio_finished = audio_messages and audio_messages[-1]['status'] == 'FINISHED'
+            if text_messages:
+                save_path = text_messages[0]['save_path']
 
-                if received_bytes and playback_stream is None:
-                    pointer = 0
-                    config = audio_messages[0]['config']
-                    bytes_per_sample = audio.get_sample_size(config['format'])
+            if audio_messages:
+                playback_bytes = b''.join([playback_bytes, *[msg['audio'] for msg in audio_messages]])
 
-                    def _callback(_, frame_count, *args):
-                        nonlocal pointer
+            if playback_bytes:
+                if playback_stream is None:
+                    playback_stream = start_playback(playback_config, playback_bytes)
+                    playback_bytes = b''
 
-                        end_pointer = pointer + frame_count * config['channels'] * bytes_per_sample
-                        chunk = received_bytes[pointer:end_pointer]
-                        pointer = end_pointer
+                # .is_stopped returns False even if .is_active is False.
+                elif not playback_stream.is_active():
+                    stop_playback(playback_stream)
+                    playback_stream = start_playback(playback_config, playback_bytes)
+                    playback_bytes = b''
 
-                        finished = audio_finished and pointer >= len(received_bytes)
-                        return chunk, pyaudio.paComplete if finished else pyaudio.paContinue
-
-                    playback_stream = start_playback(config, _callback)
-
-                if any(msg['status'] == 'FINISHED' for msg in messages):
-                    save_path = messages[-1]['save_path']
-                    window['status'].update('STOPPED')
-                    window['Delete'].update(disabled=False)
-                    window['Wrong'].update(disabled=False)
         elif event in ['Delete', 'Wrong', 'New Chat']:
             com_stream.send({'action': event.upper(), 'save_path': save_path, 'status': 'ACTION'})
             if event != 'Wrong':
