@@ -11,7 +11,8 @@ AUDIO_FORMAT = pyaudio.paInt16  # https://en.wikipedia.org/wiki/Audio_bit_depth,
 NUM_CHANNELS = 1  # Number of audio channels
 
 
-def start_recording(connection, input_device_index, values):
+async def start_recording(connection, input_device_index, values):
+    connection.send({'status': 'RESET'})
     msg = {
         'audio_config': get_audio_config(input_device_index),
         'chat_mode': values['chat_mode'],
@@ -117,7 +118,7 @@ async def ui(window, com_stream):
         window['New Chat'].update(disabled=not values['chat_mode'])
         if event == 'REC':
             if window['status'].get() == 'STOPPED':
-                rec_stream = start_recording(com_stream, INPUT_DEVICE_INDEX, values)
+                rec_stream = await start_recording(com_stream, INPUT_DEVICE_INDEX, values)
                 playback_bytes = b''
 
                 if playback_stream is not None:
@@ -142,7 +143,7 @@ async def ui(window, com_stream):
                         playback_config = msg['config']
                     audio_messages.append(msg)
                 else:
-                    raise ValueError('Unknown message type.')
+                    assert msg['status'] == 'INITIALIZING', 'Unknown message type.'
             window['message'].update(window['message'].get() + ''.join([msg['text'] for msg in text_messages]))
 
             if text_messages:

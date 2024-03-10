@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from websockets.server import serve, WebSocketServerProtocol
 from typing import Any, Callable, List
 
-from server.utils.streaming_connection import POLL_INTERVAL, StreamingConnection
+from server.utils.streaming_connection import POLL_INTERVAL, StreamingConnection, StreamReset
 
 
 class BaseServer:
@@ -51,4 +51,10 @@ class BaseServer:
         return result
 
     async def _handle_workload(self) -> None:
-        raise NotImplementedError
+        while True:
+            try:
+                await self._run_workload()
+            except StreamReset:
+                [stream.reset() for key, stream in self.streams.items() if key != 'client']
+            except ConnectionError:
+                break

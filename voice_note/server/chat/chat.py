@@ -40,49 +40,45 @@ class ChatServer(BaseServer):
         self.model = AutoModelForCausalLM.from_pretrained(CHAT_MODEL, device_map="auto", torch_dtype="auto",
                                                           local_files_only=True)
         self.system_prompt = 'Du bist ein lustiger KI-Assistent mit dem Namen Hubert.'
+        self.history = [{'role': 'system', 'content': self.system_prompt}]
 
         if tts_uri is not None:
             self.connections = {'tts': tts_uri}
 
-    async def _handle_workload(self) -> None:
+    async def _run_workload(self) -> None:
         received = []
 
-        history = [
-            {'role': 'system', 'content': self.system_prompt}
-        ]
-
         while True:
-            try:
-                while len(received) == 0:
-                    for msg in self.streams['client'].recv():
-                        if msg.get('action') == 'NEW CHAT':
-                            history = history[:1]
-                        else:
-                            received.append(msg)
-                    await asyncio.sleep(POLL_INTERVAL)
+            while len(received) == 0:
+                for msg in self.streams['client'].recv():
+                    if msg.get('action') == 'NEW CHAT':
+                        self.history = self.history[:1]
+                    elif msg.get('status') == 'INITIALIZING':
+                        continue
+                    else:
+                        received.append(msg)
+                await asyncio.sleep(POLL_INTERVAL)
 
-                history.append({'role': 'user', 'content': received.pop(0)['text']})
+            self.history.append({'role': 'user', 'content': received.pop(0)['text']})
 
-                generation_config = self.model.generation_config
-                generation_config.max_length = 2048
+            generation_config = self.model.generation_config
+            generation_config.max_length = 2048
 
-                inputs = self.tokenizer.apply_chat_template(history, add_generation_prompt=True, return_tensors='pt')
-                streamer = Streamer(self.streams, self.tokenizer, skip_prompt=True, skip_special_tokens=True)
-                await self.run_blocking_function_in_thread(
-                    partial(self.model.generate, inputs.cuda(), generation_config, streamer=streamer)
-                )
-                history.append({'role': 'assistant', 'content': streamer.result})
+            inputs = self.tokenizer.apply_chat_template(self.history, add_generation_prompt=True, return_tensors='pt')
+            streamer = Streamer(self.streams, self.tokenizer, skip_prompt=True, skip_special_tokens=True)
+            self.streams['client'].send({'status': 'INITIALIZING'})
+            await self.run_blocking_function_in_thread(
+                partial(self.model.generate, inputs.cuda(), generation_config, streamer=streamer)
+            )
+            self.history.append({'role': 'assistant', 'content': streamer.result})
 
-                waiting_for_tts = 'tts' in self.streams
-                while waiting_for_tts:
-                    messages = self.streams['tts'].recv()
-                    for msg in messages:
-                        self.streams['client'].send(msg)
-                        waiting_for_tts = msg['status'] != 'FINISHED'
-                    await asyncio.sleep(POLL_INTERVAL)
-
-            except ConnectionError:
-                break
+            waiting_for_tts = 'tts' in self.streams
+            while waiting_for_tts:
+                messages = self.streams['tts'].recv()
+                for msg in messages:
+                    self.streams['client'].send(msg)
+                    waiting_for_tts = msg['status'] != 'FINISHED'
+                await asyncio.sleep(POLL_INTERVAL)
 
 
 if __name__ == '__main__':

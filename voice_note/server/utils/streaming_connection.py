@@ -10,12 +10,18 @@ from server.utils.message import Message
 POLL_INTERVAL = 0.005  # Seconds
 
 
+class StreamReset(BaseException):
+    pass
+
+
 class StreamingConnection:
     def __init__(self, connection: Union['StreamingConnection', WebSocketClientProtocol, WebSocketServerProtocol]):
         self.connection = connection.connection if isinstance(connection, StreamingConnection) else connection
         self.received_q = SimpleQueue()
         self.ready_to_send_q = SimpleQueue()
         self.closed = False
+        self._resetting_recv = False
+        self._resetting_send = False
 
     async def run(self) -> None:
         while True:
@@ -45,17 +51,33 @@ class StreamingConnection:
 
     async def _recv_to_queue(self) -> None:
         msg = Message.from_data_string(await self.connection.recv())
-        self.received_q.put(msg.data)
+        status = msg.data.get('status')
+        if status == 'RESET':
+            self.reset(propagate=False)
+        elif self._resetting_recv:
+            if status == 'INITIALIZING':
+                self._resetting_recv = False
+                self.received_q.put(msg.data)
+        else:
+            self.received_q.put(msg.data)
 
     async def _send_from_queue(self) -> None:
         try:
-            await self.connection.send(Message(self.ready_to_send_q.get_nowait()).encode())
+            msg = Message(self.ready_to_send_q.get_nowait()).encode()
+            await self.connection.send(msg)
         except Empty:
             await asyncio.sleep(POLL_INTERVAL)
 
     def send(self, data: Message.DataDict) -> None:
         if self.closed:
             raise ConnectionError
+        elif self._resetting_send:
+            if data.get('status') == 'INITIALIZING':
+                self._resetting_send = False
+            else:
+                raise StreamReset
+        elif data.get('status') == 'RESET':
+            self.reset(propagate=False)
         self.ready_to_send_q.put(data)
 
     def recv(self) -> List[Message.DataDict]:
@@ -71,3 +93,10 @@ class StreamingConnection:
 
     async def close(self) -> None:
         await self.connection.close()
+
+    def reset(self, propagate=True):
+        if propagate:
+            self._resetting_send = False
+            self.send({'status': 'RESET'})
+        self._resetting_recv = True
+        self._resetting_send = True

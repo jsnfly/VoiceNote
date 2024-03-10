@@ -26,42 +26,41 @@ class STTServer(BaseServer):
         if chat_uri is not None:
             self.connections = {'chat': chat_uri}
 
-    async def _handle_workload(self) -> Message.DataDict:
+    async def _run_workload(self):
         received = []
 
         while True:
-            try:
-                end_idx = self._get_end_idx(received)
-                if end_idx == -1:
-                    new_messages = self.streams['client'].recv()
-                    for msg in new_messages:
-                        action = msg.get('action')
-                        if action == 'DELETE':
-                            self.delete_entry(msg['save_path'])
-                        elif action == 'WRONG':
-                            self.add_to_metadata(msg['save_path'], {'transcription_error': True})
-                        elif action == 'NEW CHAT':
-                            self.streams['chat'].send(msg)
-                        else:
-                            received.append(msg)
-                    await asyncio.sleep(POLL_INTERVAL)
-                else:
-                    messages = received[:end_idx + 1]
-                    received = received[end_idx + 1:]
-
-                    assert messages[0]['status'] == 'INITIALIZING'
-                    bytes_ = b''.join([msg.get('audio', b'') for msg in messages])
-
-                    transcription, save_path = await self.run_blocking_function_in_thread(
-                        self.transcribe, [bytes_, messages[0]['audio_config'], messages[0]['topic']]
-                    )
-                    result = {'status': 'FINISHED', 'text': transcription, 'save_path': str(save_path)}
-                    if 'chat' in self.streams and messages[0]['chat_mode']:
-                        await self.get_chat_response(result)
+            end_idx = self._get_end_idx(received)
+            if end_idx == -1:
+                new_messages = self.streams['client'].recv()
+                for msg in new_messages:
+                    action = msg.get('action')
+                    if action == 'DELETE':
+                        self.delete_entry(msg['save_path'])
+                    elif action == 'WRONG':
+                        self.add_to_metadata(msg['save_path'], {'transcription_error': True})
+                    elif action == 'NEW CHAT':
+                        self.streams['chat'].send(msg)
                     else:
-                        self.streams['client'].send(result)
-            except ConnectionError:
-                break
+                        received.append(msg)
+                await asyncio.sleep(POLL_INTERVAL)
+            else:
+                messages = received[:end_idx + 1]
+                received = received[end_idx + 1:]
+
+                assert messages[0]['status'] == 'INITIALIZING'
+                bytes_ = b''.join([msg.get('audio', b'') for msg in messages])
+
+                self.streams['client'].send({'status': 'INITIALIZING'})
+                transcription, save_path = await self.run_blocking_function_in_thread(
+                    self.transcribe, [bytes_, messages[0]['audio_config'], messages[0]['topic']]
+                )
+                result = {'status': 'FINISHED', 'text': transcription, 'save_path': str(save_path)}
+                if 'chat' in self.streams and messages[0]['chat_mode']:
+                    self.streams['chat'].send({'status': 'INITIALIZING'})
+                    await self.get_chat_response(result)
+                else:
+                    self.streams['client'].send(result)
 
     def _get_end_idx(self, received: List[Message.DataDict]) -> int:
         return next((idx for idx, msg in enumerate(received) if msg['status'] == 'FINISHED'), -1)
