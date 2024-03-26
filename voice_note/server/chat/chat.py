@@ -67,6 +67,8 @@ class ChatServer(BaseServer):
             inputs = self.tokenizer.apply_chat_template(self.history, add_generation_prompt=True, return_tensors='pt')
             streamer = Streamer(self.streams, self.tokenizer, skip_prompt=True, skip_special_tokens=True)
             self.streams['client'].send({'status': 'INITIALIZING'})
+            if 'tts' in self.streams:
+                self.streams['tts'].send({'status': 'INITIALIZING'})
             await self.run_blocking_function_in_thread(
                 partial(self.model.generate, inputs.cuda(), generation_config, streamer=streamer)
             )

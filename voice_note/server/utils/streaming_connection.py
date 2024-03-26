@@ -63,8 +63,8 @@ class StreamingConnection:
 
     async def _send_from_queue(self) -> None:
         try:
-            msg = Message(self.ready_to_send_q.get_nowait()).encode()
-            await self.connection.send(msg)
+            msg = Message(self.ready_to_send_q.get_nowait())
+            await self.connection.send(msg.encode())
         except Empty:
             await asyncio.sleep(POLL_INTERVAL)
 
@@ -76,8 +76,6 @@ class StreamingConnection:
                 self._resetting_send = False
             else:
                 raise StreamReset
-        elif data.get('status') == 'RESET':
-            self.reset(propagate=False)
         self.ready_to_send_q.put(data)
 
     def recv(self) -> List[Message.DataDict]:
@@ -100,3 +98,5 @@ class StreamingConnection:
             self.send({'status': 'RESET'})
         self._resetting_recv = True
         self._resetting_send = True
+        self.received_q = SimpleQueue()
+        self.ready_to_send_q = SimpleQueue()

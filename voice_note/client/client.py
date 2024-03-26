@@ -12,7 +12,7 @@ NUM_CHANNELS = 1  # Number of audio channels
 
 
 async def start_recording(connection, input_device_index, values):
-    connection.send({'status': 'RESET'})
+    connection.reset()
     msg = {
         'audio_config': get_audio_config(input_device_index),
         'chat_mode': values['chat_mode'],
@@ -165,6 +165,8 @@ async def ui(window, com_stream):
 
         elif event in ['Delete', 'Wrong', 'New Chat']:
             com_stream.send({'action': event.upper(), 'save_path': save_path, 'status': 'ACTION'})
+
+            # TODO: reset? (crash when using new chat when answer is not finished and starting recording after that)
             if event != 'Wrong':
                 window['Delete'].update(disabled=True)
                 window['Wrong'].update(disabled=True)
