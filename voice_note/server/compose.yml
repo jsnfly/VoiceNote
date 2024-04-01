@@ -12,7 +12,7 @@ services:
     volumes:
       - ../models/whisper:/usr/src/app/models/whisper:ro
       - ../outputs:/usr/src/app/outputs
-    user: "1000:1000"  # Same user as on host, so he created files have the same owner.
+    user: "1000:1000"  # Same user as on host, so the created files have the same owner.
     deploy:
       resources:
         reservations:

@@ -7,7 +7,7 @@ from server.utils.audio import audio
 from server.utils.streaming_connection import StreamingConnection, POLL_INTERVAL
 
 INPUT_DEVICE_INDEX = None
-AUDIO_FORMAT = pyaudio.paInt16  # https://en.wikipedia.org/wiki/Audio_bit_depth,
+AUDIO_FORMAT = pyaudio.paInt16  # https://en.wikipedia.org/wiki/Audio_bit_depth
 NUM_CHANNELS = 1  # Number of audio channels
 
 
@@ -38,11 +38,25 @@ async def start_recording(connection, input_device_index, values):
     return stream
 
 
+@lru_cache(maxsize=1)
+def get_audio_config(input_device_index):
+    if input_device_index is None:
+        device_config = audio.get_default_input_device_info()
+    else:
+        device_config = audio.get_device_info_by_index(input_device_index)
+
+    return {
+        'format': AUDIO_FORMAT,
+        'channels': NUM_CHANNELS,
+        'rate': int(device_config['defaultSampleRate'])
+    }
+
+
 def stop_recording(connection, stream):
-    stream.stop_stream()
-    stream.close()
-    connection.send({'status': 'FINISHED', 'audio': b''})
-    return None
+    if stream is not None:
+        stream.stop_stream()
+        stream.close()
+        connection.send({'status': 'FINISHED', 'audio': b''})
 
 
 def start_playback(config, data):
@@ -69,23 +83,20 @@ def start_playback(config, data):
 
 
 def stop_playback(stream):
-    stream.stop_stream()
-    stream.close()
-    return None
+    if stream is not None:
+        stream.stop_stream()
+        stream.close()
 
 
-@lru_cache(maxsize=1)
-def get_audio_config(input_device_index):
-    if input_device_index is None:
-        device_config = audio.get_default_input_device_info()
-    else:
-        device_config = audio.get_device_info_by_index(input_device_index)
-
-    return {
-        'format': AUDIO_FORMAT,
-        'channels': NUM_CHANNELS,
-        'rate': int(device_config['defaultSampleRate'])
-    }
+def recv_messages(connection, text_messages, audio_messages):
+    messages = connection.recv()
+    for msg in messages:
+        if 'text' in msg:
+            text_messages.append(msg)
+        elif 'audio' in msg:
+            audio_messages.append(msg)
+        else:
+            assert msg['status'] == 'INITIALIZING', 'Unknown message type.'
 
 
 async def main(window):
@@ -104,73 +115,50 @@ async def main(window):
 
 
 async def ui(window, com_stream):
-    rec_stream = playback_stream = playback_config = save_path = None
-    playback_bytes = b''
+    text_messages, audio_messages = [], []
+    rec_stream = playback_stream = save_path = None
 
     while True:
         await asyncio.sleep(POLL_INTERVAL)
+
         event, values = window.read(timeout=0)
+        window['New Chat'].update(disabled=not values['chat_mode'])
 
         if event == sg.WIN_CLOSED:
             await com_stream.close()
             break
-
-        window['New Chat'].update(disabled=not values['chat_mode'])
-        if event == 'REC':
-            if window['status'].get() == 'STOPPED':
-                rec_stream = await start_recording(com_stream, INPUT_DEVICE_INDEX, values)
-                playback_bytes = b''
-
-                if playback_stream is not None:
-                    playback_stream = stop_playback(playback_stream)
-
-                window['status'].update('RECORDING')
-                window['message'].update('')
+        elif event == 'REC' and window['status'].get() == 'STOPPED':
+            playback_stream = stop_playback(playback_stream)
+            text_messages, audio_messages = [], []
+            rec_stream = await start_recording(com_stream, INPUT_DEVICE_INDEX, values)
+            window['status'].update('RECORDING')
+            window['message'].update('')
         elif event == sg.TIMEOUT_EVENT:
             window['status'].update('STOPPED')
-            if rec_stream is not None:
-                rec_stream = stop_recording(com_stream, rec_stream)
-                window['Delete'].update(disabled=False)
-                window['Wrong'].update(disabled=False)
-
-            audio_messages, text_messages = [], []
-            messages = com_stream.recv()
-            for msg in messages:
-                if 'text' in msg:
-                    text_messages.append(msg)
-                elif 'audio' in msg:
-                    if 'config' in msg:
-                        playback_config = msg['config']
-                    audio_messages.append(msg)
-                else:
-                    assert msg['status'] == 'INITIALIZING', 'Unknown message type.'
-            window['message'].update(window['message'].get() + ''.join([msg['text'] for msg in text_messages]))
+            rec_stream = stop_recording(com_stream, rec_stream)
+            recv_messages(com_stream, text_messages, audio_messages)
 
             if text_messages:
+                window['message'].update(window['message'].get() + ''.join([msg['text'] for msg in text_messages]))
                 save_path = text_messages[0]['save_path']
+                window['Delete'].update(disabled=False)
+                window['Wrong'].update(disabled=False)
+                text_messages = []
 
-            if audio_messages:
-                playback_bytes = b''.join([playback_bytes, *[msg['audio'] for msg in audio_messages]])
-
-            if playback_bytes:
-                if playback_stream is None:
-                    playback_stream = start_playback(playback_config, playback_bytes)
-                    playback_bytes = b''
-
-                # .is_stopped returns False even if .is_active is False.
-                elif not playback_stream.is_active():
-                    stop_playback(playback_stream)
-                    playback_stream = start_playback(playback_config, playback_bytes)
-                    playback_bytes = b''
-
+            # .is_stopped returns False even if .is_active is False.
+            if audio_messages and (playback_stream is None or not playback_stream.is_active()):
+                stop_playback(playback_stream)
+                playback_stream = start_playback(audio_messages[0]['config'],
+                                                 b''.join([msg['audio'] for msg in audio_messages]))
+                audio_messages = []
         elif event in ['Delete', 'Wrong', 'New Chat']:
-            com_stream.send({'action': event.upper(), 'save_path': save_path, 'status': 'ACTION'})
-
-            # TODO: reset? (crash when using new chat when answer is not finished and starting recording after that)
             if event != 'Wrong':
+                com_stream.reset()
                 window['Delete'].update(disabled=True)
                 window['Wrong'].update(disabled=True)
                 window['message'].update('')
+            com_stream.send({'action': event.upper(), 'save_path': save_path, 'status': 'INITIALIZING'})
+
 
 if __name__ == '__main__':
     elements = [
