@@ -5,6 +5,7 @@ from websockets.server import serve, WebSocketServerProtocol
 from typing import Any, Callable, List
 
 from server.utils.streaming_connection import POLL_INTERVAL, StreamingConnection, StreamReset
+from server.utils.message import Message
 
 
 class BaseServer:
@@ -51,10 +52,29 @@ class BaseServer:
         return result
 
     async def _handle_workload(self) -> None:
+        received = []
         while True:
             try:
-                await self._run_workload()
+                received += self._recv_client_messages()
+                cutoff = self._get_cutoff_idx(received)
+                if cutoff > 0:
+                    await self._run_workload(received[:cutoff])
+                    received = received[cutoff:]
+                else:
+                    await asyncio.sleep(POLL_INTERVAL)
             except StreamReset:
+                received = []
                 [stream.reset() for key, stream in self.streams.items() if key != 'client']
             except ConnectionError:
                 break
+
+    def _recv_client_messages(self) -> List[Message.DataDict]:
+        return self.streams['client'].recv()
+
+    def _get_cutoff_idx(self, received: List[Message.DataDict]) -> int:
+        """ Return the index of the last element that should be included in the workload.
+        """
+        return len(received)
+
+    def _run_workload(self, received: List[Message.DataDict]) -> None:
+        raise NotImplementedError

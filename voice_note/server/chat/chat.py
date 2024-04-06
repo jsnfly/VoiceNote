@@ -1,10 +1,11 @@
 import asyncio
 from functools import partial
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextStreamer
-from typing import Dict, Union
+from typing import Dict, List, Union
 
 from server.base_server import BaseServer
 from server.utils.streaming_connection import POLL_INTERVAL, StreamingConnection
+from server.utils.message import Message
 
 CHAT_MODEL = "./models/chat/openchat_3.5"
 
@@ -45,42 +46,43 @@ class ChatServer(BaseServer):
         if tts_uri is not None:
             self.connections = {'tts': tts_uri}
 
-    async def _run_workload(self) -> None:
-        received = []
+    def _recv_client_messages(self) -> List[Message.DataDict]:
+        text_messages = []
+        for msg in super()._recv_client_messages():
+            if msg.get('action') == 'NEW CHAT':
+                self.history = self.history[:1]
+            elif msg.get('status') == 'INITIALIZING':
+                continue
+            else:
+                text_messages.append(msg)
+        return text_messages
 
-        while True:
-            while len(received) == 0:
-                for msg in self.streams['client'].recv():
-                    if msg.get('action') == 'NEW CHAT':
-                        self.history = self.history[:1]
-                    elif msg.get('status') == 'INITIALIZING':
-                        continue
-                    else:
-                        received.append(msg)
-                await asyncio.sleep(POLL_INTERVAL)
+    def _get_cutoff_idx(self, received: List[Message.DataDict]) -> int:
+        return int(len(received) > 0)
 
-            self.history.append({'role': 'user', 'content': received.pop(0)['text']})
+    async def _run_workload(self, received: List[Message.DataDict]) -> None:
+        self.history.append({'role': 'user', 'content': received[0]['text']})
 
-            generation_config = self.model.generation_config
-            generation_config.max_length = 2048
+        generation_config = self.model.generation_config
+        generation_config.max_length = 2048
 
-            inputs = self.tokenizer.apply_chat_template(self.history, add_generation_prompt=True, return_tensors='pt')
-            streamer = Streamer(self.streams, self.tokenizer, skip_prompt=True, skip_special_tokens=True)
-            self.streams['client'].send({'status': 'INITIALIZING'})
-            if 'tts' in self.streams:
-                self.streams['tts'].send({'status': 'INITIALIZING'})
-            await self.run_blocking_function_in_thread(
-                partial(self.model.generate, inputs.cuda(), generation_config, streamer=streamer)
-            )
-            self.history.append({'role': 'assistant', 'content': streamer.result})
+        inputs = self.tokenizer.apply_chat_template(self.history, add_generation_prompt=True, return_tensors='pt')
+        streamer = Streamer(self.streams, self.tokenizer, skip_prompt=True, skip_special_tokens=True)
+        self.streams['client'].send({'status': 'INITIALIZING'})
+        if 'tts' in self.streams:
+            self.streams['tts'].send({'status': 'INITIALIZING'})
+        await self.run_blocking_function_in_thread(
+            partial(self.model.generate, inputs.cuda(), generation_config, streamer=streamer)
+        )
+        self.history.append({'role': 'assistant', 'content': streamer.result})
 
-            waiting_for_tts = 'tts' in self.streams
-            while waiting_for_tts:
-                messages = self.streams['tts'].recv()
-                for msg in messages:
-                    self.streams['client'].send(msg)
-                    waiting_for_tts = msg['status'] != 'FINISHED'
-                await asyncio.sleep(POLL_INTERVAL)
+        waiting_for_tts = 'tts' in self.streams
+        while waiting_for_tts:
+            messages = self.streams['tts'].recv()
+            for msg in messages:
+                self.streams['client'].send(msg)
+                waiting_for_tts = msg['status'] != 'FINISHED'
+            await asyncio.sleep(POLL_INTERVAL)
 
 
 if __name__ == '__main__':
