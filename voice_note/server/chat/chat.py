@@ -7,7 +7,8 @@ from server.base_server import BaseServer
 from server.utils.streaming_connection import POLL_INTERVAL, StreamingConnection
 from server.utils.message import Message
 
-CHAT_MODEL = "./models/chat/openchat_3.5"
+CHAT_MODEL = './models/chat/openchat_3.5'
+TTS_URI = 'ws://tts:12347'
 
 
 class Streamer(TextStreamer):
@@ -86,4 +87,4 @@ class ChatServer(BaseServer):
 
 
 if __name__ == '__main__':
-    asyncio.run(ChatServer('0.0.0.0', '12346', 'ws://localhost:12347').serve_forever())
+    asyncio.run(ChatServer('0.0.0.0', '12346', TTS_URI).serve_forever())

@@ -15,6 +15,7 @@ SAVE_DIR = BASE_DIR / 'outputs'
 MODEL_DIR = BASE_DIR / 'models/whisper'
 
 WHISPER_MODEL = 'medium'
+CHAT_URI = 'ws://chat:12346'
 
 
 class STTServer(BaseServer):
@@ -104,4 +105,4 @@ class STTServer(BaseServer):
 
 
 if __name__ == '__main__':
-    asyncio.run(STTServer('0.0.0.0', '12345', 'ws://localhost:12346').serve_forever())
+    asyncio.run(STTServer('0.0.0.0', '12345', CHAT_URI).serve_forever())
