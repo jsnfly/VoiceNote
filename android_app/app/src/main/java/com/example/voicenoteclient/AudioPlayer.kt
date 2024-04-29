@@ -45,12 +45,14 @@ class AudioPlayer {
         thread(start = true) {
             while (true) {
                 try {
-                    val data = audioQueue.take()
-                    val length = data.size
-                    Log.d("XXXXX", "Length2 $length")
-                    if (data.isEmpty()) break  // Empty array can signal to terminate the thread
+                    if (isPlaying) {
+                        val data = audioQueue.take()
+                        val length = data.size
+                        Log.d("XXXXX", "Length2 $length")
+                        if (data.isEmpty()) break  // Empty array can signal to terminate the thread
 
-                    audioTrack?.write(data, 0, data.size)
+                        audioTrack?.write(data, 0, data.size)
+                    }
                 } catch (e: InterruptedException) {
                     Thread.currentThread().interrupt()
                 }
