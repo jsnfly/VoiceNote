@@ -3,6 +3,10 @@ package com.example.voicenoteclient
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.media.AudioManager
+import java.util.concurrent.BlockingQueue
+import java.util.concurrent.LinkedBlockingQueue
+import kotlin.concurrent.thread
+import android.util.Log
 
 fun FloatArray.toShortArray(): ShortArray {
     return this.map { sample ->
@@ -17,19 +21,15 @@ class AudioPlayer {
 
     private var audioTrack: AudioTrack? = null
     private var isPlaying = false
-    private val sampleRate = 24000  // TODO: do not hardcode
+    private val sampleRate = 24000  // TODO: Consider moving this to a configuration or dynamic setting
+    private val audioQueue: BlockingQueue<ShortArray> = LinkedBlockingQueue()
+    private val bufferSize = AudioTrack.getMinBufferSize(
+        sampleRate,
+        AudioFormat.CHANNEL_OUT_MONO,
+        AudioFormat.ENCODING_PCM_16BIT
+    )
 
-    fun playAudio(audioData: FloatArray) {
-        val shortArray = audioData.toShortArray()
-        // Ensure the previous instance is stopped and released
-        stopAudio()
-
-        val bufferSize = AudioTrack.getMinBufferSize(
-            sampleRate,
-            AudioFormat.CHANNEL_OUT_MONO,
-            AudioFormat.ENCODING_PCM_16BIT
-        )
-
+    init {
         audioTrack = AudioTrack(
             AudioManager.STREAM_MUSIC,
             sampleRate,
@@ -38,32 +38,54 @@ class AudioPlayer {
             bufferSize,
             AudioTrack.MODE_STREAM
         )
+        startAudioThread()
+    }
 
-        audioTrack?.play()
-        isPlaying = true
+    private fun startAudioThread() {
+        thread(start = true) {
+            while (true) {
+                try {
+                    val data = audioQueue.take()
+                    val length = data.size
+                    Log.d("XXXXX", "Length2 $length")
+                    if (data.isEmpty()) break  // Empty array can signal to terminate the thread
 
-        // Writing data to AudioTrack in chunks in a separate thread
-        Thread {
-            val chunkSize = 4096 // You can adjust this size
-            var i = 0
-            while (i < shortArray.size && isPlaying) {
-                val end = minOf(i + chunkSize, shortArray.size)
-                audioTrack?.write(shortArray, i, end - i)
-                i += chunkSize
+                    audioTrack?.write(data, 0, data.size)
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
             }
-            audioTrack?.stop()
-            audioTrack?.release()
-        }.start()
+        }
+    }
+
+    fun playAudio(audioData: FloatArray) {
+        val shortArray = audioData.toShortArray()
+        val length = shortArray.size
+        Log.d("XXXXX", "Length1 $length")
+        audioQueue.put(shortArray)
+        if (!isPlaying) {
+            audioTrack?.play()
+            isPlaying = true
+        }
     }
 
     fun stopAudio() {
         isPlaying = false
         audioTrack?.apply {
-            if (state == AudioTrack.STATE_INITIALIZED) {
+            if (playState == AudioTrack.PLAYSTATE_PLAYING) {
                 stop()
             }
-            release()
         }
+        releaseAudio()
+    }
+
+    fun releaseAudio() {
+        audioTrack?.release()
         audioTrack = null
+    }
+
+    fun terminateAudioProcessing() {
+        stopAudio()
+        audioQueue.put(shortArrayOf())  // Use an empty array to signal the thread to exit
     }
 }

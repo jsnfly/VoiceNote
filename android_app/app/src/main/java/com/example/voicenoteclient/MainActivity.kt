@@ -9,19 +9,19 @@ import android.widget.Button
 import android.widget.TextView
 import android.widget.EditText
 import android.widget.LinearLayout
-import java.io.DataOutputStream
-import java.io.DataInputStream
-import java.net.Socket
-import java.net.InetSocketAddress
 import android.annotation.SuppressLint
 import android.view.MotionEvent
 import android.view.View
-import Message
 import android.widget.CheckBox
-import sendMessage
-import receiveMessage
 
-import java.util.Base64
+import io.ktor.client.*
+import io.ktor.client.features.websocket.*
+import io.ktor.client.request.*
+import io.ktor.http.*
+import io.ktor.http.cio.websocket.*
+import kotlinx.coroutines.*
+import kotlinx.coroutines.launch
+
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -35,44 +35,53 @@ fun ByteArray.toFloatArray(): FloatArray {
 
 class MainActivity : AppCompatActivity() {
     private val sampleRate = 44100
-    private lateinit var audioRecord: AudioRecord
     private val audioConfig = mapOf("format" to 8, "channels" to 1, "rate" to sampleRate)
 
-    private val audioPlayer = AudioPlayer()
+    private lateinit var recordingThread: Thread
+    private var isRecording: Boolean = false
+    private lateinit var savePath: String
 
-    private var socket = Socket()
-    private lateinit var dataOutputStream: DataOutputStream
-    private lateinit var dataInputStream: DataInputStream
+    private lateinit var audioRecord: AudioRecord
+    private var audioPlayer: AudioPlayer? = null
+    private lateinit var websocketManager: WebSocketManager
 
-    private var isStreaming: Boolean = false
-    private lateinit var streamingThread: Thread
-    private lateinit var response: Message
+    private lateinit var recordButton: Button
+    private lateinit var deleteButton: Button
+    private lateinit var newChatButton: Button
+    private lateinit var wrongButton: Button
+    private lateinit var settingsButton: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
         audioRecord = setupAudioRecord(
             this, sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
         )
+        websocketManager = WebSocketManager("192.168.0.154", 12345)
+
         setupButtons()
+        GlobalScope.launch(Dispatchers.IO) {
+            recvDataFromSocket()
+        }
     }
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupButtons() {
-        val recordButton: Button = findViewById(R.id.recordButton)
-        val deleteButton: Button = findViewById(R.id.deleteButton)
-        val newChatButton: Button = findViewById(R.id.newChatButton)
-        val wrongButton: Button = findViewById(R.id.wrongButton)
-        val settingsButton: Button = findViewById(R.id.settingsButton)
+        recordButton = findViewById(R.id.recordButton)
+        deleteButton = findViewById(R.id.deleteButton)
+        newChatButton = findViewById(R.id.newChatButton)
+        wrongButton = findViewById(R.id.wrongButton)
+        settingsButton = findViewById(R.id.settingsButton)
 
         recordButton.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
-                audioPlayer.stopAudio()
+                stopPlayback()
                 recordButton.alpha = 0.25F
-                stream()
+                findViewById<TextView>(R.id.transcription).text = ""
+                startRecording()
             } else if (event.action == MotionEvent.ACTION_UP) {
-                isStreaming = false
-                streamingThread.join()
+                isRecording = false
                 deleteButton.isEnabled = true
                 wrongButton.isEnabled = true
                 recordButton.alpha = 1.0F
@@ -80,36 +89,21 @@ class MainActivity : AppCompatActivity() {
             false
         }
 
-        deleteButton.setOnTouchListener {_, event ->
+        deleteButton.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
-                sendSingleMessage(
-                    mapOf("action" to "delete", "save_path" to response["save_path"].toString())
-                ) {
-                    deleteButton.isEnabled = false
-                    wrongButton.isEnabled = false
-                    findViewById<TextView>(R.id.transcription).text = ""
-                }
-                audioPlayer.stopAudio()
+                sendAction("DELETE")
             }
             false
         }
-
-        wrongButton.setOnTouchListener {_, event ->
+        wrongButton.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
-                sendSingleMessage(
-                    mapOf("action" to "wrong", "save_path" to response["save_path"].toString())
-                ) { wrongButton.isEnabled = false }
-                audioPlayer.stopAudio()
+                sendAction("WRONG")
             }
             false
         }
-
-        newChatButton.setOnTouchListener {_, event ->
+        newChatButton.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
-                sendSingleMessage(
-                    mapOf("action" to "new_chat")
-                ) { findViewById<TextView>(R.id.transcription).text = "" }
-                audioPlayer.stopAudio()
+                sendAction("NEW CHAT")
             }
             false
         }
@@ -128,115 +122,91 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun stream() {
-        streamingThread = Thread {
-            connect()
-            sendMessage(
-                mapOf(
-                    "audio_config" to audioConfig,
-                    "topic" to findViewById<EditText>(R.id.editTextTopic).text.toString(),
-                    "chat_mode" to findViewById<CheckBox>(R.id.checkBoxChatMode).isChecked
-                ),
-                dataOutputStream
-            )
-            audioRecord.startRecording()
-            isStreaming = true
+    private fun sendAction(action: String) {
+        if (action != "WRONG") {
+            websocketManager.connection.reset(true)
+            deleteButton.isEnabled = false
+            wrongButton.isEnabled = false
+            findViewById<TextView>(R.id.transcription).text = ""
+        }
+        websocketManager.connection.send(mapOf(
+            "action" to action,
+            "save_path" to savePath,
+            "status" to "INITIALIZING"
+        ))
+    }
 
+    private fun startRecording() {
+        recordingThread = Thread {
+            websocketManager.connection.reset(true)
+            websocketManager.connection.send(mapOf(
+                "audio_config" to audioConfig,
+                "chat_mode" to findViewById<CheckBox>(R.id.checkBoxChatMode).isChecked,
+                "status" to "INITIALIZING",
+                "topic" to findViewById<EditText>(R.id.editTextTopic).text.toString()
+            ))
+            audioRecord.startRecording()
+            isRecording = true
             try {
-                while (isStreaming) {
-                    writeAudioDataToSocket()
-                }
+                while (isRecording) { writeAudioDataToSocket() }
             } catch (e: Exception) {
                 Log.e("ERROR", "Error while streaming audio.", e)
             }
-            stopStreaming()
+            stopRecording()
         }
-        streamingThread.start()
-    }
-
-    private fun connect() {
-        while (true) {
-            Log.d("DEBUG", "Trying to connect...")
-            try {
-                socket.connect(InetSocketAddress(
-                    findViewById<EditText>(R.id.editTextHost).text.toString(),
-                    findViewById<EditText>(R.id.editTextPort).text.toString().toInt(),
-                ))
-                dataOutputStream = DataOutputStream(socket.getOutputStream())
-                dataInputStream = DataInputStream(socket.getInputStream())
-                break
-            } catch (e: java.net.ConnectException) {
-                Thread.sleep(200)
-
-                // otherwise a `java.net.SocketException` is raised, that claims the socket is
-                // closed (don't understand why).
-                socket = Socket()
-            }
-        }
-        Log.d("DEBUG", "Connected.")
+        recordingThread.start()
     }
 
     private fun writeAudioDataToSocket(): Int {
         val outBuffer = ByteArray(audioRecord.bufferSizeInFrames * 2)
         val numOutBytes = audioRecord.read(outBuffer, 0, outBuffer.size)
         if (numOutBytes > 0) {
-            dataOutputStream.write(outBuffer, 0, numOutBytes)
-            // // Convert sample to hex:
-            // val start = if (numOutBytes > 64) numOutBytes - 64 else 0
-            // val hex = outBuffer.sliceArray(start until numOutBytes).joinToString(separator = " ") { String.format("%02X", it) }
-            // Log.d("DEBUG", "After $noEmptyLoops sent $numOutBytes: $hex.")
+            websocketManager.connection.send(mapOf(
+                "audio" to outBuffer.sliceArray(0..numOutBytes - 1),
+                "status" to "RECORDING"
+            ))
         }
         return numOutBytes
     }
 
-    private fun stopStreaming() {
-        Log.d("DEBUG", "stopStreaming")
-        audioRecord.stop()
-        var numOutBytes = writeAudioDataToSocket()
-        while (numOutBytes > 0) {
-            numOutBytes = writeAudioDataToSocket()
+    private suspend fun recvDataFromSocket() {
+        while (true) {
+            while (!websocketManager.isConnectionInitialized()) {
+                delay(50)
+            }
+            val messages = websocketManager.connection.receive()
+            for (msg in messages) {
+                if (msg.containsKey("text")) {
+                    savePath = msg["save_path"].toString()
+                    findViewById<TextView>(R.id.transcription).text = findViewById<TextView>(R.id.transcription).text.toString() + msg["text"].toString()
+                } else if (msg.containsKey("audio")) {
+                    if (audioPlayer == null) { audioPlayer = AudioPlayer() }
+                    audioPlayer!!.playAudio((msg["audio"] as ByteArray).toFloatArray())
+                    // TODO: Finishing currently only works because tts gives empty array with its "FINISHED" message.
+                } else {
+                    Log.d("XXXXX", msg["status"].toString())
+                }
+            }
+            delay(50)
         }
-        dataOutputStream.flush()
-        socket.shutdownOutput()
-
-        response = receiveMessage(dataInputStream)
-        findViewById<TextView>(R.id.transcription).text = response["text"].toString()
-
-        if (findViewById<CheckBox>(R.id.checkBoxChatMode).isChecked) {
-            val audioData = Base64.getDecoder().decode(
-                (response["audio"] as LinkedHashMap<*,*>)["data_base64"].toString()
-            ).toFloatArray()
-            audioPlayer.playAudio(audioData)
-        }
-
-        dataOutputStream.close()
-        dataInputStream.close()
-
-        socket.close()
-        socket = Socket()
     }
 
-    private fun sendSingleMessage(msg: Map<String, String>, onSuccess: () -> Unit ) {
-        val thread = Thread {
-            connect()
-            sendMessage(msg, dataOutputStream)
-            socket.close()
-            socket = Socket()
-            runOnUiThread {
-                onSuccess()
-            }
+    private fun stopRecording() {
+        Log.d("XXXXX", "STOP RECORDING")
+        audioRecord.stop()
+        var numOutBytes = writeAudioDataToSocket()
+        while (numOutBytes > 0) { numOutBytes = writeAudioDataToSocket() }
+        websocketManager.connection.send(mapOf("status" to "FINISHED", "audio" to ByteArray(0)))
+    }
+
+    private fun stopPlayback() {
+        if (audioPlayer != null) {
+            audioPlayer!!.terminateAudioProcessing()
+            audioPlayer = null
         }
-        thread.start()
-        thread.join()
     }
 
     override fun onDestroy() {
-        Log.d("DEBUG", "onDestroy")
         super.onDestroy()
-    }
-
-    override fun onPause() {
-        Log.d("DEBUG", "onPause")
-        super.onPause()
     }
 }

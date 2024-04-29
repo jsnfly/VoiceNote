@@ -1,76 +1,44 @@
 import com.google.gson.Gson
-import java.io.DataOutputStream
-import java.io.DataInputStream
-import java.io.ByteArrayOutputStream
-import java.net.SocketException
+import com.google.gson.reflect.TypeToken
+import java.util.Base64
 
-class Message(private val data: Map<String, Any>) {
-
+data class Message(val data: Map<String, Any?>) {
     companion object {
-        private const val SEP = "\n\n\n\n\n\n\n\n\n"
+        private val gson = Gson()
 
-        fun decode(bytes: ByteArray): Message {
-            val json = bytes.toString(Charsets.UTF_8).replace(SEP, "")
-            val data = destringify(Gson().fromJson(json, Map::class.java))
-            return Message(data as Map<String, Any>)
+        fun fromDataString(dataString: String): Message {
+            val type = object : TypeToken<Map<String, Any?>>() {}.type
+            val data: Map<String, Any?> = gson.fromJson(dataString, type)
+            return Message(destringifyValues(data))
         }
 
-        private fun destringify(value: Any?): Any? {
-            return when (value) {
-                is String -> {
-                    try {
-                        value.toInt()
-                    } catch (e: NumberFormatException) {
-                        try {
-                            value.toDouble()
-                        } catch (e: NumberFormatException) {
-                            value
-                        }
-                    }
+        private fun destringifyValues(encodedData: Map<String, Any?>): Map<String, Any?> {
+            val transformed = mutableMapOf<String, Any?>()
+            encodedData.forEach { (key, value) ->
+                transformed[key.removeSuffix("_base64")] = when {
+                    key.endsWith("_base64") && value is String -> Base64.getDecoder().decode(value)
+                    value is Map<*, *> -> destringifyValues(value as Map<String, Any?>)
+                    else -> value
                 }
-                is Map<*, *> -> value.mapValues { destringify(it.value) }
-                else -> value
+            }
+            return transformed
+        }
+    }
+
+    fun encode(): String {
+        val stringifiedData = stringifyValues(data)
+        return gson.toJson(stringifiedData)
+    }
+
+    private fun stringifyValues(data: Map<String, Any?>): Map<String, Any?> {
+        val transformed = mutableMapOf<String, Any?>()
+        data.forEach { (key, value) ->
+            when (value) {
+                is ByteArray -> transformed["${key}_base64"] = Base64.getEncoder().encodeToString(value)
+                is Map<*, *> -> transformed[key] = stringifyValues(value as Map<String, Any?>)
+                else -> transformed[key] = value
             }
         }
+        return transformed
     }
-
-    fun encode(): ByteArray {
-        val json = Gson().toJson(data)
-        return "$SEP$json$SEP".toByteArray(Charsets.UTF_8)
-    }
-
-    operator fun contains(key: String): Boolean {
-        return data.containsKey(key)
-    }
-
-    operator fun get(key: String): Any? {
-        return data[key]
-    }
-}
-
-fun sendMessage(data: Map<String, Any>, dataOutputStream: DataOutputStream) {
-    dataOutputStream.write(Message(data).encode())
-    dataOutputStream.flush()
-}
-
-fun receiveMessage(dataInputStream: DataInputStream): Message {
-    val bufferSize = 1024 * 1024
-    val buffer = ByteArray(bufferSize)
-    val byteOutputStream = ByteArrayOutputStream()
-
-    var bytesRead: Int
-    while (true) {
-        try {
-            bytesRead = dataInputStream.read(buffer)
-        } catch (e: SocketException) {
-            break
-        }
-        if (bytesRead == -1) {
-            // End of stream reached
-            break
-        }
-        byteOutputStream.write(buffer, 0, bytesRead)
-    }
-    val totalData = byteOutputStream.toByteArray()
-    return Message.decode(totalData)
 }
