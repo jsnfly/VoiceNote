@@ -82,6 +82,7 @@ class MainActivity : AppCompatActivity() {
                 startRecording()
             } else if (event.action == MotionEvent.ACTION_UP) {
                 isRecording = false
+                stopRecording()
                 deleteButton.isEnabled = true
                 wrongButton.isEnabled = true
                 recordButton.alpha = 1.0F
@@ -152,7 +153,6 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 Log.e("ERROR", "Error while streaming audio.", e)
             }
-            stopRecording()
         }
         recordingThread.start()
     }
