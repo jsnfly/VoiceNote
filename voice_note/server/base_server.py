@@ -1,11 +1,31 @@
 import asyncio
+import threading
 import websockets
 from concurrent.futures import ThreadPoolExecutor
 from websockets.server import serve, WebSocketServerProtocol
-from typing import Any, Callable, List
+from typing import Any, List
 
 from server.utils.streaming_connection import POLL_INTERVAL, StreamingConnection, StreamReset
 from server.utils.message import Message
+
+
+class ThreadExecutor:
+    def __init__(self):
+        self.cancel_event = threading.Event()
+
+    async def run(self, *fn_args) -> Any:
+        self.cancel_event.clear()
+        try:
+            with ThreadPoolExecutor() as pool:
+                # Could also use `None` as executor instead of `pool` which would also use a ThreadPoolExecutor by
+                # default. However, this seems more explicit.
+                result = await asyncio.get_running_loop().run_in_executor(pool, self.blocking_fn, *fn_args)
+            return result
+        except asyncio.CancelledError:
+            self.cancel_event.set()
+
+    def blocking_fn(self) -> Any:
+        raise NotImplementedError
 
 
 class BaseServer:
@@ -43,14 +63,6 @@ class BaseServer:
         streaming_tasks = [asyncio.create_task(stream.run(), name=key) for key, stream in self.streams.items()]
         return streaming_tasks + [asyncio.create_task(self._handle_workload())]
 
-    @staticmethod
-    async def run_blocking_function_in_thread(blocking_fn: Callable, fn_args: List[Any] = []) -> Any:
-        with ThreadPoolExecutor() as pool:
-            # Could also use `None` as executor instead of `pool` which would also use a ThreadPoolExecutor by
-            # default. However, this seems more explicit.
-            result = await asyncio.get_running_loop().run_in_executor(pool, blocking_fn, *fn_args)
-        return result
-
     async def _handle_workload(self) -> None:
         received = []
         while True:
@@ -58,13 +70,18 @@ class BaseServer:
                 received += self._recv_client_messages()
                 cutoff = self._get_cutoff_idx(received)
                 if cutoff > 0:
-                    await self._run_workload(received[:cutoff])
+                    workload = asyncio.create_task(self._run_workload(received[:cutoff]))
+                    await workload
                     received = received[cutoff:]
                 else:
                     await asyncio.sleep(POLL_INTERVAL)
             except StreamReset:
-                received = []
+                # Only triggered when the current server tries to send something via a resetting connection. This could
+                # also be just forwarding of messages from other server, which would trigger the reset command to be
+                # sent to them.
                 [stream.reset() for key, stream in self.streams.items() if key != 'client']
+                received = []
+                workload.cancel()
             except ConnectionError:
                 break
 

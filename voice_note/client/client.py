@@ -1,6 +1,7 @@
 import asyncio
 import pyaudio
 import PySimpleGUI as sg
+from uuid import uuid4
 import websockets
 from functools import lru_cache
 from server.utils.audio import audio
@@ -12,18 +13,19 @@ NUM_CHANNELS = 1  # Number of audio channels
 
 
 async def start_recording(connection, input_device_index, values):
-    connection.reset()
-    msg = {
+    id_ = str(uuid4())
+    connection.reset(id_)
+    connection.send({
         'audio_config': get_audio_config(input_device_index),
         'chat_mode': values['chat_mode'],
+        'id': id_,
         'status': 'INITIALIZING',
         'topic': values['topic']
-    }
-    connection.send(msg)
+    })
 
     def _callback(in_data, *args):
         try:
-            connection.send({'status': 'RECORDING', 'audio': in_data})
+            connection.send({'audio': in_data, 'id': id_, 'status': 'RECORDING'})
             return None, pyaudio.paContinue
         except BrokenPipeError:
             return None, pyaudio.paComplete
@@ -56,7 +58,7 @@ def stop_recording(connection, stream):
     if stream is not None:
         stream.stop_stream()
         stream.close()
-        connection.send({'status': 'FINISHED', 'audio': b''})
+        connection.send({'audio': b'', 'id': connection.communication_id, 'status': 'FINISHED'})
 
 
 def start_playback(config, data):
@@ -157,7 +159,9 @@ async def ui(window, com_stream):
                 window['Delete'].update(disabled=True)
                 window['Wrong'].update(disabled=True)
                 window['message'].update('')
-            com_stream.send({'action': event.upper(), 'save_path': save_path, 'status': 'INITIALIZING'})
+            id_ = str(uuid4())
+            com_stream.reset(id_)
+            com_stream.send({'action': event.upper(), 'save_path': save_path, 'status': 'INITIALIZING', 'id': id_})
 
 
 if __name__ == '__main__':

@@ -4,7 +4,7 @@ import whisper
 from pathlib import Path
 from typing import Dict, List, Tuple, Union
 
-from server.base_server import BaseServer
+from server.base_server import BaseServer, ThreadExecutor
 from server.utils.audio import AudioConfig
 from server.utils.message import Message
 from server.utils.sample import Sample
@@ -18,11 +18,23 @@ WHISPER_MODEL = 'medium'
 CHAT_URI = 'ws://chat:12346'
 
 
+class Transcription(ThreadExecutor):
+    def __init__(self):
+        super().__init__()
+        self.model = whisper.load_model(WHISPER_MODEL, device='cuda', download_root=str(MODEL_DIR))
+        self.decoding_options = whisper.DecodingOptions()
+
+    def blocking_fn(self, bytes_: bytes, audio_config: Dict, topic: str) -> Tuple[str, Path]:
+        sample = Sample([bytes_], AudioConfig(**audio_config))
+        sample.transcribe(self.model, self.decoding_options)
+        save_path = sample.save(SAVE_DIR / topic)
+        print(sample.result.text)
+        return sample.result.text, save_path
+
+
 class STTServer(BaseServer):
     def __init__(self, host: str, port: int, chat_uri: Union[str, None] = None):
         super().__init__(host, port)
-        self.model = whisper.load_model(WHISPER_MODEL, device='cuda', download_root=str(MODEL_DIR))
-        self.decoding_options = whisper.DecodingOptions()
 
         if chat_uri is not None:
             self.connections = {'chat': chat_uri}
@@ -46,13 +58,11 @@ class STTServer(BaseServer):
 
     async def _run_workload(self, messages: List[Message.DataDict]) -> None:
         assert messages[0]['status'] == 'INITIALIZING'
-        self.streams['client'].send({'status': 'INITIALIZING'})
 
         bytes_ = b''.join([msg.get('audio', b'') for msg in messages])
-        transcription, save_path = await self.run_blocking_function_in_thread(
-            self.transcribe, [bytes_, messages[0]['audio_config'], messages[0]['topic']]
-        )
-        result = {'status': 'FINISHED', 'text': transcription, 'save_path': str(save_path)}
+        transcription, save_path = await Transcription().run(bytes_, messages[0]['audio_config'], messages[0]['topic'])
+
+        result = {'status': 'FINISHED', 'text': transcription, 'save_path': str(save_path), 'id': messages[0]['id']}
         if 'chat' in self.streams and messages[0]['chat_mode']:
             self.streams['chat'].send({'status': 'INITIALIZING'})
             await self.get_chat_response(result)
@@ -86,13 +96,6 @@ class STTServer(BaseServer):
         metadata = metadata | data
         with metadata_path.open('w') as f:
             json.dump(metadata, f, sort_keys=True, indent=4, ensure_ascii=False)
-
-    def transcribe(self, bytes_: bytes, audio_config: Dict, topic: str) -> Tuple[str, Path]:
-        sample = Sample([bytes_], AudioConfig(**audio_config))
-        sample.transcribe(self.model, self.decoding_options)
-        save_path = sample.save(SAVE_DIR / topic)
-        print(sample.result.text)
-        return sample.result.text, save_path
 
     async def get_chat_response(self, transcription_result: Message.DataDict) -> None:
         self.streams['chat'].send(transcription_result)

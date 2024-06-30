@@ -20,8 +20,7 @@ class StreamingConnection:
         self.received_q = SimpleQueue()
         self.ready_to_send_q = SimpleQueue()
         self.closed = False
-        self._resetting_recv = False
-        self._resetting_send = False
+        self.communication_id = None
 
     async def run(self) -> None:
         while True:
@@ -51,15 +50,13 @@ class StreamingConnection:
 
     async def _recv_to_queue(self) -> None:
         msg = Message.from_data_string(await self.connection.recv())
-        status = msg.data.get('status')
-        if status == 'RESET':
-            self.reset(propagate=False)
-        elif self._resetting_recv:
-            if status == 'INITIALIZING':
-                self._resetting_recv = False
-                self.received_q.put(msg.data)
-        else:
+
+        if msg.data.get('status') == 'RESET':
+            self.reset(msg['id'], propagate=False)
+        elif self._is_valid_msg(msg.data.get('id')):
             self.received_q.put(msg.data)
+        else:
+            print(f"Discarding msg with id {msg.get('id')}.")
 
     async def _send_from_queue(self) -> None:
         try:
@@ -71,12 +68,10 @@ class StreamingConnection:
     def send(self, data: Message.DataDict) -> None:
         if self.closed:
             raise ConnectionError
-        elif self._resetting_send:
-            if data.get('status') == 'INITIALIZING':
-                self._resetting_send = False
-            else:
-                raise StreamReset
-        self.ready_to_send_q.put(data)
+        elif self._is_valid_msg(data.get('id')):
+            self.ready_to_send_q.put(data)
+        else:
+            raise StreamReset
 
     def recv(self) -> List[Message.DataDict]:
         if self.closed:
@@ -92,11 +87,12 @@ class StreamingConnection:
     async def close(self) -> None:
         await self.connection.close()
 
-    def reset(self, propagate=True):
-        if propagate:
-            self._resetting_send = False
-            self.send({'status': 'RESET'})
-        self._resetting_recv = True
-        self._resetting_send = True
+    def reset(self, id_, propagate=True):
         self.received_q = SimpleQueue()
         self.ready_to_send_q = SimpleQueue()
+        self.communication_id = id_
+        if propagate:
+            self.send({'id': id_, 'status': 'RESET'})
+
+    def _is_valid_msg(self, id_):
+        return (self.communication_id is None) or (id_ == self.communication_id)
