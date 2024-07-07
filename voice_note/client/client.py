@@ -155,7 +155,6 @@ async def ui(window, com_stream):
                 audio_messages = []
         elif event in ['Delete', 'Wrong', 'New Chat']:
             if event != 'Wrong':
-                com_stream.reset()
                 window['Delete'].update(disabled=True)
                 window['Wrong'].update(disabled=True)
                 window['message'].update('')

@@ -58,13 +58,14 @@ class STTServer(BaseServer):
 
     async def _run_workload(self, messages: List[Message.DataDict]) -> None:
         assert messages[0]['status'] == 'INITIALIZING'
+        if 'chat' in self.streams:
+            self.streams['chat'].reset(messages[0]['id'])
 
         bytes_ = b''.join([msg.get('audio', b'') for msg in messages])
         transcription, save_path = await Transcription().run(bytes_, messages[0]['audio_config'], messages[0]['topic'])
 
         result = {'status': 'FINISHED', 'text': transcription, 'save_path': str(save_path), 'id': messages[0]['id']}
         if 'chat' in self.streams and messages[0]['chat_mode']:
-            self.streams['chat'].send({'status': 'INITIALIZING'})
             await self.get_chat_response(result)
         else:
             self.streams['client'].send(result)

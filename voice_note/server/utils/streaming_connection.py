@@ -11,7 +11,9 @@ POLL_INTERVAL = 0.005  # Seconds
 
 
 class StreamReset(BaseException):
-    pass
+    def __init__(self, message, id_):
+        super().__init__(message)
+        self.id = id_
 
 
 class StreamingConnection:
@@ -56,7 +58,7 @@ class StreamingConnection:
         elif self._is_valid_msg(msg.data.get('id')):
             self.received_q.put(msg.data)
         else:
-            print(f"Discarding msg with id {msg.get('id')}.")
+            print(f"Discarding msg with id {msg.data.get('id')}.")
 
     async def _send_from_queue(self) -> None:
         try:
@@ -71,7 +73,7 @@ class StreamingConnection:
         elif self._is_valid_msg(data.get('id')):
             self.ready_to_send_q.put(data)
         else:
-            raise StreamReset
+            raise StreamReset("Invalid message ID", self.communication_id)
 
     def recv(self) -> List[Message.DataDict]:
         if self.closed:
@@ -88,9 +90,9 @@ class StreamingConnection:
         await self.connection.close()
 
     def reset(self, id_, propagate=True):
+        self.communication_id = id_
         self.received_q = SimpleQueue()
         self.ready_to_send_q = SimpleQueue()
-        self.communication_id = id_
         if propagate:
             self.send({'id': id_, 'status': 'RESET'})
 
