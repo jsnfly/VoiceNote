@@ -68,6 +68,12 @@ class BaseServer:
         while True:
             try:
                 received += self._recv_client_messages()
+
+                # Discard data for a previous id. Necessary, because the StreamReset (and with that the clearing of
+                # `received`) happens only after it was attempted to send a response.
+                if len(received) > 1 and received[0]['id'] != received[-1]['id']:
+                    received = [data for data in received if data['id'] == received[-1]['id']]
+
                 cutoff = self._get_cutoff_idx(received)
                 if cutoff > 0:
                     workload = asyncio.create_task(self._run_workload(received[:cutoff]))

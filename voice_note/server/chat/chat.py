@@ -7,7 +7,7 @@ from server.utils.streaming_connection import POLL_INTERVAL, StreamingConnection
 from server.utils.message import Message
 
 CHAT_MODEL = './models/chat/openchat_3.5'
-TTS_URI = None  # 'ws://localhost:12347'
+TTS_URI = 'ws://localhost:12347'
 
 
 class Generation(ThreadExecutor):
