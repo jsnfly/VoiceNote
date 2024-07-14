@@ -45,9 +45,6 @@ class TTSServer(BaseServer):
             'rate': self.generation.sample_rate
         }
 
-    def _recv_client_messages(self) -> List[Message.DataDict]:
-        return [msg for msg in self.streams['client'].recv() if msg['status'] != 'INITIALIZING']
-
     def _get_cutoff_idx(self, received: List[Message.DataDict]) -> int:
         idx = next((idx for idx in range(len(received)) if self._is_finished(received[:idx + 1])), -1) + 1
         return idx
