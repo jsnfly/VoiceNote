@@ -10,7 +10,7 @@ from server.utils.message import Message
 POLL_INTERVAL = 0.005  # Seconds
 
 
-class StreamReset(BaseException):
+class StreamReset(Exception):
     def __init__(self, message, id_):
         super().__init__(message)
         self.id = id_

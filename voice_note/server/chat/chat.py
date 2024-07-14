@@ -20,9 +20,8 @@ class Generation(ThreadExecutor):
     def blocking_fn(self, inputs, streams, id_):
         generation_config = self.model.generation_config
         generation_config.max_length = 2048
-        streamer = Streamer(id_, self.cancel_event, streams, self.tokenizer, skip_prompt=True, skip_special_tokens=True)
+        streamer = Streamer(id_, streams, self.tokenizer, skip_prompt=True, skip_special_tokens=True)
         self.model.generate(inputs, generation_config, streamer=streamer)
-
         return streamer.result
 
 
@@ -30,7 +29,6 @@ class Streamer(TextStreamer):
     def __init__(
         self,
         id_,
-        cancel_event,
         streams: Dict[str, StreamingConnection],
         tokenizer: "AutoTokenizer",
         skip_prompt: bool = False,
@@ -38,21 +36,21 @@ class Streamer(TextStreamer):
     ):
         super().__init__(tokenizer, skip_prompt, **decode_kwargs)
         self.id = id_
-        self.cancel_event = cancel_event
         self.streams = streams
         self.result = ''
 
     def on_finalized_text(self, text: str, stream_end: bool = False):
         self.result += text
 
-        if self.cancel_event.is_set():
-            print("STOP ITERATION!!!")
-            raise StopIteration()
-        elif 'tts' in self.streams:
+        if 'tts' in self.streams:
             self.streams['tts'].send(
                 {'status': 'FINISHED' if stream_end else 'GENERATING', 'text': text, 'id': self.id}
             )
+
+            # In case of a StreamReset, it is raised here and generation is interrupted. No need to use a cancellation
+            # Event.
             self.streams['client'].send({'status': 'GENERATING', 'text': text, 'id': self.id})
+
             for msg in self.streams['tts'].recv():
                 self.streams['client'].send(msg)
         else:

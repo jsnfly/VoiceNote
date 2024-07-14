@@ -48,6 +48,8 @@ class STTServer(BaseServer):
             elif action == 'WRONG':
                 self.add_to_metadata(msg['save_path'], {'transcription_error': True})
             elif action == 'NEW CHAT':
+                if 'chat' in self.streams:
+                    self.streams['chat'].reset(msg['id'])
                 self.streams['chat'].send(msg)
             else:
                 audio_messages.append(msg)
