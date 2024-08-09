@@ -1,8 +1,9 @@
 import asyncio
 import json
-import whisper
+import torch
 from pathlib import Path
 from typing import Dict, List, Tuple, Union
+from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
 from server.base_server import BaseServer, ThreadExecutor
 from server.utils.audio import AudioConfig
@@ -12,29 +13,31 @@ from server.utils.streaming_connection import POLL_INTERVAL
 
 BASE_DIR = (Path(__file__).parent / '../../').resolve()
 SAVE_DIR = BASE_DIR / 'outputs'
-MODEL_DIR = BASE_DIR / 'models/whisper'
+MODEL_DIR = BASE_DIR / 'models/whisper-medium'
 
-WHISPER_MODEL = 'medium'
-CHAT_URI = 'ws://chat:12346'
+CHAT_URI = None  # 'ws://localhost:12346'
 
 
 class Transcription(ThreadExecutor):
     def __init__(self):
         super().__init__()
-        self.model = whisper.load_model(WHISPER_MODEL, device='cuda', download_root=str(MODEL_DIR))
-        self.decoding_options = whisper.DecodingOptions()
+        self.processor = WhisperProcessor.from_pretrained(MODEL_DIR, local_files_only=True)
+        self.model = WhisperForConditionalGeneration.from_pretrained(MODEL_DIR, use_safetensors=True,
+                                                                     local_files_only=True, torch_dtype=torch.float16)
+        self.model.cuda()
 
     def blocking_fn(self, bytes_: bytes, audio_config: Dict, topic: str) -> Tuple[str, Path]:
         sample = Sample([bytes_], AudioConfig(**audio_config))
-        sample.transcribe(self.model, self.decoding_options)
+        sample.transcribe(self.model, self.processor)
         save_path = sample.save(SAVE_DIR / topic)
-        print(sample.result.text)
-        return sample.result.text, save_path
+        print(sample.result)
+        return sample.result, save_path
 
 
 class STTServer(BaseServer):
     def __init__(self, host: str, port: int, chat_uri: Union[str, None] = None):
         super().__init__(host, port)
+        self.transcription = Transcription()
 
         if chat_uri is not None:
             self.connections = {'chat': chat_uri}
@@ -64,7 +67,8 @@ class STTServer(BaseServer):
             self.streams['chat'].reset(messages[0]['id'])
 
         bytes_ = b''.join([msg.get('audio', b'') for msg in messages])
-        transcription, save_path = await Transcription().run(bytes_, messages[0]['audio_config'], messages[0]['topic'])
+        transcription, save_path = await self.transcription.run(bytes_, messages[0]['audio_config'],
+                                                                messages[0]['topic'])
 
         result = {'status': 'FINISHED', 'text': transcription, 'save_path': str(save_path), 'id': messages[0]['id']}
         if 'chat' in self.streams and messages[0]['chat_mode']:
