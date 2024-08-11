@@ -76,6 +76,9 @@ class BaseServer:
 
                 cutoff = self._get_cutoff_idx(received)
                 if cutoff > 0:
+                    # Reset other streams with new id.
+                    [stream.reset(received[0]['id']) for key, stream in self.streams.items() if key != 'client']
+
                     workload = asyncio.create_task(self._run_workload(received[:cutoff]))
                     await workload
                     received = received[cutoff:]

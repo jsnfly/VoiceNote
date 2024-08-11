@@ -5,7 +5,7 @@ from pathlib import Path
 from torchaudio.transforms import Resample
 from typing import List, Union
 
-from audio import AudioConfig
+from server.utils.audio import AudioConfig
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
 

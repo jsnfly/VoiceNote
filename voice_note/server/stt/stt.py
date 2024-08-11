@@ -17,7 +17,7 @@ MODEL_DIR = BASE_DIR / 'models/whisper-medium'
 
 DEVICE, DTYPE = ('cuda:0', torch.float16) if torch.cuda.is_available() else ('cpu', torch.float32)
 
-CHAT_URI = None  # 'ws://localhost:12346'
+CHAT_URI = 'ws://localhost:12346'
 
 
 class Transcription(ThreadExecutor):
@@ -66,8 +66,6 @@ class STTServer(BaseServer):
 
     async def _run_workload(self, messages: List[Message.DataDict]) -> None:
         assert messages[0]['status'] == 'INITIALIZING'
-        if 'chat' in self.streams:
-            self.streams['chat'].reset(messages[0]['id'])
 
         bytes_ = b''.join([msg.get('audio', b'') for msg in messages])
         transcription, save_path = await self.transcription.run(bytes_, messages[0]['audio_config'],
