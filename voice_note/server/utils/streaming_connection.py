@@ -11,14 +11,14 @@ POLL_INTERVAL = 0.005  # Seconds
 
 
 class StreamReset(Exception):
-    def __init__(self, message, id_):
+    def __init__(self, message: str, id_: str):
         super().__init__(message)
         self.id = id_
 
 
 class StreamingConnection:
-    def __init__(self, connection: Union['StreamingConnection', WebSocketClientProtocol, WebSocketServerProtocol]):
-        self.connection = connection.connection if isinstance(connection, StreamingConnection) else connection
+    def __init__(self, connection: Union[WebSocketClientProtocol, WebSocketServerProtocol]):
+        self.connection = connection
         self.received_q = SimpleQueue()
         self.ready_to_send_q = SimpleQueue()
         self.closed = False
@@ -32,10 +32,8 @@ class StreamingConnection:
                 for task in done:
                     if task.exception() is not None:
                         raise task.exception()
-            except ConnectionClosedOK:
-                self.closed = True
-                break
-            except ConnectionClosedError:
+            except (ConnectionClosedOK, ConnectionClosedError):
+                # TODO: Should the two be handled differently?
                 self.closed = True
                 break
             finally:
@@ -89,12 +87,12 @@ class StreamingConnection:
     async def close(self) -> None:
         await self.connection.close()
 
-    def reset(self, id_, propagate=True):
+    def reset(self, id_: str, propagate: bool = True) -> None:
         self.communication_id = id_
         self.received_q = SimpleQueue()
         self.ready_to_send_q = SimpleQueue()
         if propagate:
             self.send({'id': id_, 'status': 'RESET'})
 
-    def _is_valid_msg(self, id_):
+    def _is_valid_msg(self, id_: str) -> bool:
         return (self.communication_id is None) or (id_ == self.communication_id)

@@ -83,8 +83,8 @@ class BaseServer:
                     await asyncio.sleep(POLL_INTERVAL)
             except StreamReset as e:
                 # Only triggered when the current server tries to send something via a resetting connection. This could
-                # also be just forwarding of messages from other server, which would trigger the reset command to be
-                # sent to them.
+                # also be just forwarding of messages from another server, which would trigger the reset command to be
+                # sent to it.
                 [stream.reset(e.id) for key, stream in self.streams.items() if key != 'client']
                 received = []
                 workload.cancel()

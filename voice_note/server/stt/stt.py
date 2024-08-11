@@ -15,6 +15,8 @@ BASE_DIR = (Path(__file__).parent / '../../').resolve()
 SAVE_DIR = BASE_DIR / 'outputs'
 MODEL_DIR = BASE_DIR / 'models/whisper-medium'
 
+DEVICE, DTYPE = ('cuda:0', torch.float16) if torch.cuda.is_available() else ('cpu', torch.float32)
+
 CHAT_URI = None  # 'ws://localhost:12346'
 
 
@@ -22,9 +24,10 @@ class Transcription(ThreadExecutor):
     def __init__(self):
         super().__init__()
         self.processor = WhisperProcessor.from_pretrained(MODEL_DIR, local_files_only=True)
-        self.model = WhisperForConditionalGeneration.from_pretrained(MODEL_DIR, use_safetensors=True,
-                                                                     local_files_only=True, torch_dtype=torch.float16)
-        self.model.cuda()
+        self.model = WhisperForConditionalGeneration.from_pretrained(
+            MODEL_DIR, use_safetensors=True, local_files_only=True, torch_dtype=DTYPE
+        )
+        self.model.to(DEVICE)
 
     def blocking_fn(self, bytes_: bytes, audio_config: Dict, topic: str) -> Tuple[str, Path]:
         sample = Sample([bytes_], AudioConfig(**audio_config))
