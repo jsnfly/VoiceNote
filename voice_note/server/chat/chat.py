@@ -9,7 +9,7 @@ from server.utils.message import Message
 
 CHAT_MODEL = './models/Meta-Llama-3.1-8B-Instruct'
 SYSTEM_PROMPT = ''
-TTS_URI = 'ws://localhost:12347'
+TTS_URI = 'ws://tts:12347'
 
 
 class Generation(ThreadExecutor):

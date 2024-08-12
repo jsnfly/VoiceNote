@@ -9,6 +9,7 @@ from server.base_server import BaseServer, ThreadExecutor
 from server.utils.message import Message
 
 TTS_MODEL = './models/xtts/tts_models--multilingual--multi-dataset--xtts_v2'
+LANG = 'en'
 
 
 class Generation(ThreadExecutor):
@@ -30,7 +31,7 @@ class Generation(ThreadExecutor):
         return next(self.inference_stream, None)
 
     def initialize_stream(self, text):
-        self.inference_stream = self.model.inference_stream(text, "de", self.gpt_cond_latent, self.speaker_embedding)
+        self.inference_stream = self.model.inference_stream(text, LANG, self.gpt_cond_latent, self.speaker_embedding)
 
 
 class TTSServer(BaseServer):

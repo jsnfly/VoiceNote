@@ -17,7 +17,7 @@ MODEL_DIR = BASE_DIR / 'models/whisper-medium'
 
 DEVICE, DTYPE = ('cuda:0', torch.float16) if torch.cuda.is_available() else ('cpu', torch.float32)
 
-CHAT_URI = 'ws://localhost:12346'
+CHAT_URI = 'ws://chat:12346'
 
 
 class Transcription(ThreadExecutor):

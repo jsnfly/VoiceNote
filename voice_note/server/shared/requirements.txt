@@ -1,2 +1,4 @@
 websockets==12.0
-torch==2.2.0
+torch==2.4.0
+
+# TODO: coqui-tts does currently not support the latest transformers version. If it does transformers may be added here.

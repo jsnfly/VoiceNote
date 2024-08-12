@@ -10,9 +10,9 @@ services:
     ports:
       - 12345:12345
     volumes:
-      - ../models/whisper:/usr/src/app/models/whisper:ro
+      - ../models/whisper-medium:/usr/src/app/models/whisper-medium:ro
       - ../outputs:/usr/src/app/outputs
-    user: "1000:1000"  # Same user as on host, so the created files have the same owner.
+    user: 1000:1000  # Same user as on host, so the created files have the same owner.
     deploy:
       resources:
         reservations:
@@ -29,7 +29,7 @@ services:
       dockerfile: chat/Dockerfile
     container_name: voice_note_chat
     volumes:
-      - ../models/chat:/usr/src/app/models/chat:ro
+      - ../models/Meta-Llama-3.1-8B-Instruct:/usr/src/app/models/Meta-Llama-3.1-8B-Instruct:ro
     expose:
       - 12346
     deploy:
