@@ -48,7 +48,7 @@ services:
       dockerfile: tts/Dockerfile
     container_name: voice_note_tts
     volumes:
-      - ../models/xtts:/usr/src/app/models/xtts:ro
+      - ../models/XTTS-v2:/usr/src/app/models/XTTS-v2:ro
     expose:
       - 12347
     deploy:

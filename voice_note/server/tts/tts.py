@@ -8,8 +8,9 @@ from typing import List
 from server.base_server import BaseServer, ThreadExecutor
 from server.utils.message import Message
 
-TTS_MODEL = './models/xtts/tts_models--multilingual--multi-dataset--xtts_v2'
+TTS_MODEL = './models/XTTS-v2'
 LANG = 'en'
+SAMPLE = f"{TTS_MODEL}/samples/{LANG}_sample.wav"
 
 
 class Generation(ThreadExecutor):
@@ -21,9 +22,7 @@ class Generation(ThreadExecutor):
         self.model.load_checkpoint(config, checkpoint_dir=TTS_MODEL)
         self.model.cuda()
 
-        self.gpt_cond_latent, self.speaker_embedding = self.model.get_conditioning_latents(
-            audio_path=[f"{TTS_MODEL}/../sample.wav"]
-        )
+        self.gpt_cond_latent, self.speaker_embedding = self.model.get_conditioning_latents(audio_path=[SAMPLE])
         self.sample_rate = self.model.config.audio.output_sample_rate
 
     def blocking_fn(self):
