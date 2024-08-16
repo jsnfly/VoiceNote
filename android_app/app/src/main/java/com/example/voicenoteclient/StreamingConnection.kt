@@ -2,7 +2,6 @@ import android.util.Log
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.*
 import io.ktor.http.cio.websocket.*
-import kotlinx.coroutines.channels.getOrElse
 
 class ConnectionClosedException(message: String = "Connection is closed") : Exception(message)
 
@@ -13,8 +12,7 @@ class StreamingConnection(
     private var receivedChannel = Channel<Map<String, Any?>>(Channel.UNLIMITED)
     private var sendChannel = Channel<Map<String, Any?>>(Channel.UNLIMITED)
     private var closed = false
-    private var resettingRecv = false
-    private var resettingSend = false
+    var communicationID: String? = null
 
     fun run() {
         externalScope.launch {
@@ -31,15 +29,13 @@ class StreamingConnection(
                     is Frame.Text -> {
                         val message = Message.fromDataString(frame.readText())
                         val status = message.data["status"] as? String
+                        val id = message.data["id"] as String
                         if (status == "RESET") {
-                            reset(propagate = false)
-                        } else if (resettingRecv) {
-                            if (status == "INITIALIZING") {
-                                resettingRecv = false
-                                receivedChannel.send(message.data)
-                            }
-                        } else {
+                            reset(id = id, propagate = false)
+                        } else if (isValidMessage(id)) {
                             receivedChannel.send(message.data)
+                        } else {
+                            Log.d("XXXXX", "Discarding msg with id $id.")
                         }
                     }
                     else -> {}
@@ -64,16 +60,10 @@ class StreamingConnection(
     fun send(data: Map<String, Any?>) {
         if (closed) {
             throw ConnectionClosedException("Connection is closed")
-        } else if (resettingSend) {
-            if (data["status"] == "INITIALIZING") {
-                resettingSend = false
-            } else {
-                throw Exception("Reset in progress")
-            }
-        }
-
-        externalScope.launch {
-            sendChannel.send(data)
+        } else if (isValidMessage(data["id"] as String)) {
+            externalScope.launch { sendChannel.send(data) }
+        } else {
+            throw Exception("Reset in progress")
         }
     }
 
@@ -87,19 +77,22 @@ class StreamingConnection(
         received
     }
 
-    fun reset(propagate: Boolean) {
-        if (propagate) {
-            resettingSend = false
-            send(mapOf("status" to "RESET"))
-        }
-        resettingRecv = true
-        resettingSend = true
+    fun reset(id: String, propagate: Boolean = true) {
+        communicationID = id
 
         // Clear queues.
         runBlocking {
             while (!receivedChannel.isEmpty) { receivedChannel.receive() }
             while (!sendChannel.isEmpty) { sendChannel.receive() }
         }
+
+        if (propagate) {
+            send(mapOf("id" to id, "status" to "RESET"))
+        }
+    }
+
+    private fun isValidMessage(id: String): Boolean {
+        return communicationID == null || communicationID == id
     }
 
     suspend fun close() {

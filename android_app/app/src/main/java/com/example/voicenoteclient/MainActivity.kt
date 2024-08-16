@@ -24,6 +24,7 @@ import kotlinx.coroutines.launch
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.UUID
 
 fun ByteArray.toFloatArray(): FloatArray {
     val buffer = ByteBuffer.wrap(this)
@@ -125,13 +126,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun sendAction(action: String) {
         if (action != "WRONG") {
-            websocketManager.connection.reset(true)
             deleteButton.isEnabled = false
             wrongButton.isEnabled = false
             findViewById<TextView>(R.id.transcription).text = ""
         }
+        val id = UUID.randomUUID().toString()
+        websocketManager.connection.reset(id)
         websocketManager.connection.send(mapOf(
             "action" to action,
+            "id" to id,
             "save_path" to savePath,
             "status" to "INITIALIZING"
         ))
@@ -139,17 +142,19 @@ class MainActivity : AppCompatActivity() {
 
     private fun startRecording() {
         recordingThread = Thread {
-            websocketManager.connection.reset(true)
+            val id = UUID.randomUUID().toString()
+            websocketManager.connection.reset(id)
             websocketManager.connection.send(mapOf(
                 "audio_config" to audioConfig,
                 "chat_mode" to findViewById<CheckBox>(R.id.checkBoxChatMode).isChecked,
+                "id" to id,
                 "status" to "INITIALIZING",
                 "topic" to findViewById<EditText>(R.id.editTextTopic).text.toString()
             ))
             audioRecord.startRecording()
             isRecording = true
             try {
-                while (isRecording) { writeAudioDataToSocket() }
+                while (isRecording) { writeAudioDataToSocket(id) }
             } catch (e: Exception) {
                 Log.e("ERROR", "Error while streaming audio.", e)
             }
@@ -157,12 +162,13 @@ class MainActivity : AppCompatActivity() {
         recordingThread.start()
     }
 
-    private fun writeAudioDataToSocket(): Int {
+    private fun writeAudioDataToSocket(id: String): Int {
         val outBuffer = ByteArray(audioRecord.bufferSizeInFrames * 2)
         val numOutBytes = audioRecord.read(outBuffer, 0, outBuffer.size)
         if (numOutBytes > 0) {
             websocketManager.connection.send(mapOf(
                 "audio" to outBuffer.sliceArray(0..numOutBytes - 1),
+                "id" to id,
                 "status" to "RECORDING"
             ))
         }
@@ -194,9 +200,12 @@ class MainActivity : AppCompatActivity() {
     private fun stopRecording() {
         Log.d("XXXXX", "STOP RECORDING")
         audioRecord.stop()
-        var numOutBytes = writeAudioDataToSocket()
-        while (numOutBytes > 0) { numOutBytes = writeAudioDataToSocket() }
-        websocketManager.connection.send(mapOf("status" to "FINISHED", "audio" to ByteArray(0)))
+        val id = websocketManager.connection.communicationID!!
+        var numOutBytes = writeAudioDataToSocket(id)
+        while (numOutBytes > 0) { numOutBytes = writeAudioDataToSocket(id) }
+        websocketManager.connection.send(
+            mapOf("status" to "FINISHED", "audio" to ByteArray(0), "id" to id)
+        )
     }
 
     private fun stopPlayback() {
