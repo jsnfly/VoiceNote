@@ -1,7 +1,6 @@
 import asyncio
 import threading
 import websockets
-from concurrent.futures import ThreadPoolExecutor
 from websockets.server import serve, WebSocketServerProtocol
 from typing import Any, List
 
@@ -16,10 +15,7 @@ class ThreadExecutor:
     async def run(self, *fn_args) -> Any:
         self.cancel_event.clear()
         try:
-            with ThreadPoolExecutor() as pool:
-                # Could also use `None` as executor instead of `pool` which would also use a ThreadPoolExecutor by
-                # default. However, this seems more explicit.
-                result = await asyncio.get_running_loop().run_in_executor(pool, self.blocking_fn, *fn_args)
+            result = await asyncio.to_thread(self.blocking_fn, *fn_args)
             return result
         except asyncio.CancelledError:
             self.cancel_event.set()
@@ -33,6 +29,7 @@ class BaseServer:
         self.host = host
         self.port = port
         self.connections = {}  # Connection URIs to other servers.
+        self.streams = {}
 
     async def serve_forever(self) -> None:
         async with serve(self.handle_connection, self.host, self.port):
@@ -40,6 +37,9 @@ class BaseServer:
 
     async def handle_connection(self, client_connection: WebSocketServerProtocol) -> None:
         print(f"Connection from {client_connection.remote_address}")
+        for stream in self.streams.values():
+            await stream.close()
+
         self.streams = {}
         for key, uri in self.connections.items():
             self.streams[key] = await self.setup_connection(uri)

@@ -121,15 +121,15 @@ async def ui(window, com_stream):
     rec_stream = playback_stream = save_path = None
 
     while True:
-        await asyncio.sleep(POLL_INTERVAL)
-
         event, values = window.read(timeout=0)
-        window['New Chat'].update(disabled=not values['chat_mode'])
-
         if event == sg.WIN_CLOSED:
             await com_stream.close()
             break
-        elif event == 'REC' and window['status'].get() == 'STOPPED':
+
+        await asyncio.sleep(POLL_INTERVAL)
+        window['New Chat'].update(disabled=not values['chat_mode'])
+
+        if event == 'REC' and window['status'].get() == 'STOPPED':
             playback_stream = stop_playback(playback_stream)
             text_messages, audio_messages = [], []
             rec_stream = await start_recording(com_stream, INPUT_DEVICE_INDEX, values)

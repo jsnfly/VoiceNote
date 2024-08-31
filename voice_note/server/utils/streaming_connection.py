@@ -50,7 +50,6 @@ class StreamingConnection:
 
     async def _recv_to_queue(self) -> None:
         msg = Message.from_data_string(await self.connection.recv())
-
         if msg.data.get('status') == 'RESET':
             self.reset(msg['id'], propagate=False)
         elif self._is_valid_msg(msg.data.get('id')):
@@ -68,7 +67,8 @@ class StreamingConnection:
     def send(self, data: Message.DataDict) -> None:
         if self.closed:
             raise ConnectionError
-        elif self._is_valid_msg(data.get('id')):
+
+        if self._is_valid_msg(data.get('id')):
             self.ready_to_send_q.put(data)
         else:
             raise StreamReset("Invalid message ID", self.communication_id)
@@ -76,6 +76,7 @@ class StreamingConnection:
     def recv(self) -> List[Message.DataDict]:
         if self.closed:
             raise ConnectionError
+
         received = []
         while True:
             try:

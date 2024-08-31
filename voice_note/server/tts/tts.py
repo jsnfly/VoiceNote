@@ -7,6 +7,7 @@ from typing import List
 
 from server.base_server import BaseServer, ThreadExecutor
 from server.utils.message import Message
+from server.utils.streaming_connection import POLL_INTERVAL
 
 TTS_MODEL = './models/XTTS-v2'
 LANG = 'en'
@@ -26,8 +27,14 @@ class Generation(ThreadExecutor):
         self.sample_rate = self.model.config.audio.output_sample_rate
 
     def blocking_fn(self):
-        # StopIteration does not play well with async code. Therefore handle generator exhaustion gracefully.
-        return next(self.inference_stream, None)
+        try:
+            # StopIteration does not play well with async code. Therefore handle generator exhaustion gracefully.
+            x = next(self.inference_stream, None)
+            return x
+        except ValueError:
+            # TODO: Ideally this should not be necessary. It seems there can be multiple threads accessing
+            #  `inference_stream` at the same time, but not sure why.
+            return 'DUMMY'
 
     def initialize_stream(self, text):
         self.inference_stream = self.model.inference_stream(text, LANG, self.gpt_cond_latent, self.speaker_embedding)
@@ -64,6 +71,9 @@ class TTSServer(BaseServer):
             chunk = await self.generation.run()
             if chunk is None:
                 break
+            elif chunk == "DUMMY":
+                await asyncio.sleep(POLL_INTERVAL)
+                continue
 
             self.streams['client'].send({
                 'audio': np.array(chunk.cpu(), dtype=np.float32).tobytes(),
