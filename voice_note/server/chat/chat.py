@@ -65,7 +65,7 @@ class ChatServer(BaseServer):
         super().__init__(host, port)
         self.history = []
         if SYSTEM_PROMPT:
-            self.history.append({'role': 'system', 'content': self.system_prompt})
+            self.history.append({'role': 'system', 'content': SYSTEM_PROMPT})
         self.generation = Generation()
 
         if tts_uri is not None:
