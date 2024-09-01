@@ -37,6 +37,7 @@
         android:background="@android:color/system_accent1_100"
         android:hint="@string/default_transcription"
         android:scrollbarAlwaysDrawVerticalTrack="true"
+        android:scrollbarThumbVertical="@color/purple_200"
         android:scrollbars="vertical"
         android:textColor="@color/purple_200"
         android:textColorHint="@android:color/primary_text_light"

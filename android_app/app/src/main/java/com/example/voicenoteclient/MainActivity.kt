@@ -13,6 +13,7 @@ import android.annotation.SuppressLint
 import android.view.MotionEvent
 import android.view.View
 import android.widget.CheckBox
+import android.text.method.ScrollingMovementMethod
 
 import io.ktor.client.*
 import io.ktor.client.features.websocket.*
@@ -40,7 +41,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var recordingThread: Thread
     private var isRecording: Boolean = false
-    private lateinit var savePath: String
+    private var savePath: String? = null
 
     private lateinit var audioRecord: AudioRecord
     private var audioPlayer: AudioPlayer? = null
@@ -62,6 +63,7 @@ class MainActivity : AppCompatActivity() {
         websocketManager = WebSocketManager("192.168.0.154", 12345)
 
         setupButtons()
+        findViewById<TextView>(R.id.transcription).movementMethod = ScrollingMovementMethod()
         GlobalScope.launch(Dispatchers.IO) {
             recvDataFromSocket()
         }

@@ -17,12 +17,12 @@ class Sample:
         self.resampler = Resample(audio_config.rate, 16_000)
         self.result = None
 
-    def transcribe(self, model: WhisperForConditionalGeneration, processor: WhisperProcessor):
+    def transcribe(self, model: WhisperForConditionalGeneration, processor: WhisperProcessor, lang: str = None):
         if len(self.fragments) == 0:
             return
 
         input_features = processor(self.audio_data, sampling_rate=16_000, return_tensors="pt").input_features
-        pred_ids = model.generate(input_features.to(model.device, dtype=model.dtype))
+        pred_ids = model.generate(input_features.to(model.device, dtype=model.dtype), language=lang)
         self.result = processor.batch_decode(pred_ids, skip_special_tokens=True)[0]
 
     @property

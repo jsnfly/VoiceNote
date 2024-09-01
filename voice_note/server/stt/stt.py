@@ -14,6 +14,7 @@ from server.utils.streaming_connection import POLL_INTERVAL
 BASE_DIR = (Path(__file__).parent / '../../').resolve()
 SAVE_DIR = BASE_DIR / 'outputs'
 MODEL_DIR = BASE_DIR / 'models/whisper-medium'
+LANG = None
 
 DEVICE, DTYPE = ('cuda:0', torch.float16) if torch.cuda.is_available() else ('cpu', torch.float32)
 
@@ -31,7 +32,7 @@ class Transcription(ThreadExecutor):
 
     def blocking_fn(self, bytes_: bytes, audio_config: Dict, topic: str) -> Tuple[str, Path]:
         sample = Sample([bytes_], AudioConfig(**audio_config))
-        sample.transcribe(self.model, self.processor)
+        sample.transcribe(self.model, self.processor, LANG)
         save_path = sample.save(SAVE_DIR / topic)
         print(sample.result)
         return sample.result, save_path
