@@ -10,7 +10,7 @@ from server.utils.message import Message
 from server.utils.streaming_connection import POLL_INTERVAL
 
 TTS_MODEL = './models/XTTS-v2'
-LANG = 'en'
+LANG = 'de'
 SAMPLE = f"{TTS_MODEL}/samples/{LANG}_sample.wav"
 
 

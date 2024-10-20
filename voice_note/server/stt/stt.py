@@ -14,7 +14,7 @@ from server.utils.streaming_connection import POLL_INTERVAL
 BASE_DIR = (Path(__file__).parent / '../../').resolve()
 SAVE_DIR = BASE_DIR / 'outputs'
 MODEL_DIR = BASE_DIR / 'models/whisper-medium'
-LANG = None
+LANG = 'de'
 
 DEVICE, DTYPE = ('cuda:0', torch.float16) if torch.cuda.is_available() else ('cpu', torch.float32)
 
