@@ -205,6 +205,11 @@ class MainActivity : AppCompatActivity() {
         }
         val id = UUID.randomUUID().toString()
         websocketManager.connection.reset(id)
+
+        // TODO: it seems when messages are send exactly at the same time, they may arrive in
+        // wrong order, but not sure.
+        Thread.sleep(20)
+
         websocketManager.connection.send(mapOf(
             "action" to action,
             "id" to id,
@@ -217,6 +222,11 @@ class MainActivity : AppCompatActivity() {
         recordingThread = Thread {
             val id = UUID.randomUUID().toString()
             websocketManager.connection.reset(id)
+
+            // TODO: it seems when messages are send exactly at the same time, they may arrive in
+            // wrong order, but not sure.
+            Thread.sleep(20)
+
             websocketManager.connection.send(mapOf(
                 "audio_config" to audioConfig,
                 "chat_mode" to findViewById<CheckBox>(R.id.checkBoxChatMode).isChecked,
