@@ -42,7 +42,7 @@ class Generation(ThreadExecutor):
 
 class TTSServer(BaseServer):
     def __init__(self, host: str, port: int):
-        super().__init__(host, port)
+        super().__init__("tts", host, port)
         self.generation = Generation()
 
         self.eos_rx = re.compile(r"(\.(?:\s|\Z))")

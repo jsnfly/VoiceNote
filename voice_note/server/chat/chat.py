@@ -64,7 +64,7 @@ class Streamer(TextStreamer):
 class ChatServer(BaseServer):
 
     def __init__(self, host: str, port: int, tts_uri: Union[str, None] = None):
-        super().__init__(host, port)
+        super().__init__("chat", host, port)
         self.history = []
         if SYSTEM_PROMPT:
             self.history.append({'role': 'system', 'content': SYSTEM_PROMPT})

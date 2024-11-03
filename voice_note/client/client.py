@@ -112,7 +112,7 @@ async def main(window):
         except ConnectionRefusedError:
             await asyncio.sleep(POLL_INTERVAL)
 
-    stream = StreamingConnection(websocket)
+    stream = StreamingConnection("client", websocket)
     await asyncio.gather(stream.run(), ui(window, stream))
 
 

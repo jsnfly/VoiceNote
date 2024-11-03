@@ -1,6 +1,8 @@
 from pathlib import Path
 from datetime import datetime
 
+BASE_DIR = (Path(__file__).parent / '../../').resolve()
+
 
 def round_to_nearest_appropriate_number(num, step_size):
     """ Rounds the given number `num` to the nearest multiple of `step_size` """

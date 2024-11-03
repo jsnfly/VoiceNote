@@ -25,7 +25,8 @@ class ThreadExecutor:
 
 
 class BaseServer:
-    def __init__(self, host: str, port: int):
+    def __init__(self, name: str, host: str, port: int):
+        self.name = name
         self.host = host
         self.port = port
         self.connections = {}  # Connection URIs to other servers.
@@ -42,22 +43,21 @@ class BaseServer:
 
         self.streams = {}
         for key, uri in self.connections.items():
-            self.streams[key] = await self.setup_connection(uri)
-        self.streams['client'] = StreamingConnection(client_connection)
+            self.streams[key] = await self.setup_connection(key, uri)
+        self.streams['client'] = StreamingConnection(f"{self.name}_client", client_connection)
 
         _, pending = await asyncio.wait(self._create_tasks(), return_when=asyncio.FIRST_COMPLETED)
         StreamingConnection.cancel_tasks(pending)
         self.streams = {}
 
-    @staticmethod
-    async def setup_connection(uri: str) -> StreamingConnection:
+    async def setup_connection(self, connection_name: str, uri: str) -> StreamingConnection:
         while True:
             try:
                 connection = await websockets.connect(uri)
                 break
             except ConnectionRefusedError:
                 await asyncio.sleep(POLL_INTERVAL)
-        return StreamingConnection(connection)
+        return StreamingConnection(f"{self.name}_{connection_name}", connection)
 
     def _create_tasks(self) -> List[asyncio.Task]:
         streaming_tasks = [asyncio.create_task(stream.run(), name=key) for key, stream in self.streams.items()]

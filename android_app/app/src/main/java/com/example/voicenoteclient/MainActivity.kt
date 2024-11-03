@@ -27,6 +27,14 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.UUID
 
+import android.content.Context
+import java.io.File
+import java.io.FileWriter
+import java.io.IOException
+import android.widget.Toast
+
+import android.content.pm.PackageManager
+
 fun ByteArray.toFloatArray(): FloatArray {
     val buffer = ByteBuffer.wrap(this)
     buffer.order(ByteOrder.LITTLE_ENDIAN) // Make sure to set the correct endianness
@@ -35,7 +43,34 @@ fun ByteArray.toFloatArray(): FloatArray {
     return floatArray
 }
 
+class CustomExceptionHandler(private val context: Context) : Thread.UncaughtExceptionHandler {
+    private val defaultExceptionHandler = Thread.getDefaultUncaughtExceptionHandler()
+
+    override fun uncaughtException(thread: Thread, throwable: Throwable) {
+        try {
+            // Log the crash
+            val logFile = File(context.getExternalFilesDir(null), "crash_log.txt")
+            FileWriter(logFile, true).use { writer ->
+                writer.append("${System.currentTimeMillis()}: CRASH in thread ${thread.name}\n")
+                writer.append("Error: ${throwable.message}\n")
+                writer.append("Stack trace:\n")
+                throwable.stackTrace.forEach { element ->
+                    writer.append("    $element\n")
+                }
+                writer.append("\n")
+            }
+        } catch (e: IOException) {
+            Toast.makeText(context, "Failed to save log", Toast.LENGTH_LONG).show()
+        } finally {
+            // Make sure to call the default handler after logging
+            defaultExceptionHandler?.uncaughtException(thread, throwable)
+        }
+    }
+}
+
 class MainActivity : AppCompatActivity() {
+    private val AUDIO_PERMISSION_REQUEST_CODE = 123
+
     private val sampleRate = 44100
     private val audioConfig = mapOf("format" to 8, "channels" to 1, "rate" to sampleRate)
 
@@ -56,16 +91,52 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        Thread.setDefaultUncaughtExceptionHandler(CustomExceptionHandler(applicationContext))
 
-        audioRecord = setupAudioRecord(
-            this, sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
-        )
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            audioRecord = setupAudioRecord(
+                this, sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
+            )
+        } else {
+            // Request the permission
+            requestPermissions(
+                arrayOf(android.Manifest.permission.RECORD_AUDIO),
+                AUDIO_PERMISSION_REQUEST_CODE
+            )
+        }
+
         websocketManager = WebSocketManager("192.168.0.154", 12345)
 
         setupButtons()
         findViewById<TextView>(R.id.transcription).movementMethod = ScrollingMovementMethod()
         GlobalScope.launch(Dispatchers.IO) {
             recvDataFromSocket()
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+
+        when (requestCode) {
+            AUDIO_PERMISSION_REQUEST_CODE -> {
+                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    // Permission was granted
+                    audioRecord = setupAudioRecord(
+                        this, sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
+                    )
+                } else {
+                    // Permission denied
+                    Toast.makeText(
+                        this,
+                        "Audio recording permission is required for this feature",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
         }
     }
 

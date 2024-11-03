@@ -8,10 +8,10 @@ from transformers import WhisperForConditionalGeneration, WhisperProcessor
 from server.base_server import BaseServer, ThreadExecutor
 from server.utils.audio import AudioConfig
 from server.utils.message import Message
+from server.utils.misc import BASE_DIR
 from server.utils.sample import Sample
 from server.utils.streaming_connection import POLL_INTERVAL
 
-BASE_DIR = (Path(__file__).parent / '../../').resolve()
 SAVE_DIR = BASE_DIR / 'outputs'
 MODEL_DIR = BASE_DIR / 'models/whisper-medium'
 LANG = 'de'
@@ -40,7 +40,7 @@ class Transcription(ThreadExecutor):
 
 class STTServer(BaseServer):
     def __init__(self, host: str, port: int, chat_uri: Union[str, None] = None):
-        super().__init__(host, port)
+        super().__init__("stt", host, port)
         self.transcription = Transcription()
 
         if chat_uri is not None:

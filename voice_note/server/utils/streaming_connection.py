@@ -1,13 +1,18 @@
 import asyncio
-
+import logging
+from datetime import datetime
+from hashlib import md5
+from typing import List, Union
 from websockets.server import WebSocketServerProtocol
 from websockets.client import WebSocketClientProtocol
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 from queue import SimpleQueue, Empty
-from typing import List, Union
+
 from server.utils.message import Message
+from server.utils.misc import BASE_DIR
 
 POLL_INTERVAL = 0.005  # Seconds
+LOG_DIR = BASE_DIR / 'logs'
 
 
 class StreamReset(Exception):
@@ -17,7 +22,8 @@ class StreamReset(Exception):
 
 
 class StreamingConnection:
-    def __init__(self, connection: Union[WebSocketClientProtocol, WebSocketServerProtocol]):
+    def __init__(self, name: str, connection: Union[WebSocketClientProtocol, WebSocketServerProtocol]):
+        self._setup_logger(name)
         self.connection = connection
         self.received_q = SimpleQueue()
         self.ready_to_send_q = SimpleQueue()
@@ -50,6 +56,7 @@ class StreamingConnection:
 
     async def _recv_to_queue(self) -> None:
         msg = Message.from_data_string(await self.connection.recv())
+        self.logger.debug(f"Received message {md5(msg.encode().encode()).hexdigest()} with status {msg.data.get('status')}")
         if msg.data.get('status') == 'RESET':
             self.reset(msg['id'], propagate=False)
         elif self._is_valid_msg(msg.data.get('id')):
@@ -61,6 +68,7 @@ class StreamingConnection:
         try:
             msg = Message(self.ready_to_send_q.get_nowait())
             await self.connection.send(msg.encode())
+            self.logger.debug(f"Sent message {md5(msg.encode().encode()).hexdigest()} with status {msg.data.get('status')}")
         except Empty:
             await asyncio.sleep(POLL_INTERVAL)
 
@@ -97,3 +105,14 @@ class StreamingConnection:
 
     def _is_valid_msg(self, id_: str) -> bool:
         return (self.communication_id is None) or (id_ == self.communication_id)
+
+    def _setup_logger(self, name):
+        LOG_DIR.mkdir(exist_ok=True)
+
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(logging.DEBUG)
+        file_handler = logging.FileHandler(f"{LOG_DIR}/{name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+        formatter = logging.Formatter('%(asctime)s,%(msecs)03d - %(levelname)s - %(message)s',
+                                      datefmt='%Y-%m-%d %H:%M:%S')
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)

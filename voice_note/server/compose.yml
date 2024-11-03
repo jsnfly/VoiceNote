@@ -11,6 +11,7 @@ services:
       - 12345:12345
     volumes:
       - ../models/whisper-medium:/usr/src/app/models/whisper-medium:ro
+      - ../logs:/usr/src/app/logs
       - ../outputs:/usr/src/app/outputs
     user: 1000:1000  # Same user as on host, so the created files have the same owner.
     deploy:
@@ -30,6 +31,7 @@ services:
     container_name: voice_note_chat
     volumes:
       - ../models/Meta-Llama-3.1-8B-Instruct:/usr/src/app/models/Meta-Llama-3.1-8B-Instruct:ro
+      - ../logs:/usr/src/app/logs
     expose:
       - 12346
     deploy:
@@ -49,6 +51,7 @@ services:
     container_name: voice_note_tts
     volumes:
       - ../models/XTTS-v2:/usr/src/app/models/XTTS-v2:ro
+      - ../logs:/usr/src/app/logs
     expose:
       - 12347
     deploy:
