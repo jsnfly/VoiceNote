@@ -1,8 +1,1 @@
-coqui-tts==0.24.1
-numba==0.60.0
-numpy==1.26.4
-scikit-learn==1.5.1
-scipy==1.14.0
-spacy==3.7.5
-transformers==4.40.2
-torch==2.4.0
+torchaudio==2.6.0

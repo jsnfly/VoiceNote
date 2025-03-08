@@ -1,0 +1,3 @@
+[submodule "voice_note/server/tts/xtts-runner"]
+	path = voice_note/server/tts/xtts-runner
+	url = git@github.com:jsnfly/xtts-runner.git
