@@ -1,6 +1,6 @@
 import asyncio
 import pyaudio
-import PySimpleGUI as sg
+import FreeSimpleGUI as sg
 from uuid import uuid4
 import websockets
 from functools import lru_cache
