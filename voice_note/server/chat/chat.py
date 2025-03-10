@@ -7,8 +7,8 @@ from server.base_server import BaseServer, ThreadExecutor
 from server.utils.streaming_connection import POLL_INTERVAL, StreamingConnection
 from server.utils.message import Message
 
-CHAT_MODEL = './models/Meta-Llama-3.1-8B-Instruct'
-SYSTEM_PROMPT = """Your name is George. Your are an intelligent, witty and pragmatic assistant. You are part of
+CHAT_MODEL = './models/chat/Mistral-Small-24B-Instruct-2501'
+SYSTEM_PROMPT = """Your name is George. Your are an intelligent, witty and pragmatic assistant. You are part of a
 speech-to-speech pipeline, i.e. you can talk to the user directly. This means you should keep your answers concise,
 like in a real conversation. You prefer to answer in german, but if the user uses english you also answer in english."""
 TTS_URI = 'ws://tts:12347'
@@ -17,14 +17,13 @@ TTS_URI = 'ws://tts:12347'
 class Generation(ThreadExecutor):
     def __init__(self):
         super().__init__()
-        self.model = AutoModelForCausalLM.from_pretrained(
-            CHAT_MODEL, local_files_only=True, device_map="auto", torch_dtype="auto"
-        )
+        self.model = AutoModelForCausalLM.from_pretrained(CHAT_MODEL, local_files_only=True, load_in_4bit=True)
+        self.model.cuda()
         self.tokenizer = AutoTokenizer.from_pretrained(CHAT_MODEL, local_files_only=True)
 
     def blocking_fn(self, inputs: torch.Tensor, streams: Dict[str, StreamingConnection], id_: str) -> str:
         generation_config = self.model.generation_config
-        generation_config.max_length = 2048
+        generation_config.max_length = 8192
         streamer = Streamer(id_, streams, self.tokenizer, skip_prompt=True, skip_special_tokens=True)
         self.model.generate(inputs, generation_config, streamer=streamer)
         return streamer.result

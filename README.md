@@ -9,7 +9,7 @@ A voice application with two modes of operation:
 
 - Clone the model repositories to the `models` directory:
     1. Speech-to-text: https://huggingface.co/openai/whisper-medium
-    2. Chat: https://huggingface.co/meta-llama/Meta-Llama-3.1-8B-Instruct
+    2. Chat: https://huggingface.co/mistralai/Mistral-Small-24B-Instruct-2501
     3. Text-to-Speech: https://huggingface.co/coqui/XTTS-v2
 
 - **For the python client** the requirements in `client/requirements.txt` must be installed. For PyAudio the dev

@@ -16,7 +16,7 @@ from tokenizer import TextTokenizer
 
 TTS_MODEL = './models/XTTS-v2'
 LANG = 'de'
-SPEAKER = "Marcos Rudaski"
+SPEAKER = "Ferran Simen"
 
 
 class Generation(ThreadExecutor):
