@@ -10,59 +10,44 @@ from server.base_server import BaseServer, ThreadExecutor
 from server.utils.message import Message
 from server.utils.streaming_connection import StreamingConnection
 
-sys.path.append('server/tts/xtts-runner/src')
-from gpt import XTTSGPT
-from tokenizer import TextTokenizer
+sys.path.append('server/tts/Spark-TTS')
+from cli.SparkTTS import SparkTTS
 
-TTS_MODEL = './models/XTTS-v2'
-LANG = 'de'
-SPEAKER = "Ferran Simen"
+TTS_MODEL = './models/Spark-TTS-0.5B'
+SPEECH_CONFIG = {
+    'gender': 'male',
+    'pitch': 'high',
+    'speed': 'high'
+}
 
 
 class Generation(ThreadExecutor):
     def __init__(self):
         super().__init__()
-        self.text_tokenizer = TextTokenizer(str(Path(TTS_MODEL) / "vocab.json"))
-        self.model = XTTSGPT(Path(TTS_MODEL) / "config.json")
-        self.model.load(Path(TTS_MODEL) / "model.pth")
-        self.model.cuda()
-        self.model.set_speaker_embeddings(Path(TTS_MODEL) / "speakers_xtts.pth", SPEAKER)
+        self.model = SparkTTS(TTS_MODEL, torch.device("cuda"))
 
     def blocking_fn(self, text: str, streams: Dict[str, StreamingConnection], id_: str, audio_config: dict) -> None:
-        token_encoding = self.text_tokenizer.encode(text, LANG)
-        input_ids = torch.tensor(
-            token_encoding.ids + [self.model.config.gpt_start_audio_token], dtype=torch.int64
-        ).unsqueeze(0)
-        streamer = Streamer(streams, id_, audio_config, [], self.model.decoder, self.model.speaker_emb, chunk_size=20)
-        self.model.generate(
-            input_ids.cuda(),
-            bos_token_id=self.model.config.gpt_start_audio_token,
-            pad_token_id=self.model.config.gpt_stop_audio_token,
-            eos_token_id=self.model.config.gpt_stop_audio_token,
+        prompt = self.model.process_prompt_control(text=text, **SPEECH_CONFIG)
+        model_inputs = self.model.tokenizer([prompt], return_tensors="pt").to(self.model.device)
+
+        streamer = Streamer(streams, id_, audio_config, self.model, chunk_size=30)
+        self.model.model.generate(
+            **model_inputs,
+            max_new_tokens=3000,
             do_sample=True,
-            top_p=0.85,
             top_k=50,
-            temperature=0.75,
-            num_return_sequences=1,
-            num_beams=1,
-            length_penalty=1.0,
-            repetition_penalty=5.0,
-            max_new_tokens=self.model.config.gpt_max_audio_tokens,
-            return_dict_in_generate=True,
-            output_hidden_states=True,
-            all_latents=streamer.all_latents,
+            top_p=0.95,
+            temperature=0.8,
             streamer=streamer
         )
 
 
 class Streamer(BaseStreamer):
 
-    def __init__(self, streams, id_, audio_config, all_latents, decoder, speaker_embedding, chunk_size):
+    def __init__(self, streams, id_, audio_config, model, chunk_size):
         self.streams = streams
-        self.all_latents = all_latents
         self.chunk_size = chunk_size
-        self.decoder = decoder
-        self.speaker_embedding = speaker_embedding.to(decoder.device)
+        self.model = model
         self.generated_tokens = []
         self.len_generated_audio_bytes = 0
         self.base_msg = {
@@ -70,21 +55,46 @@ class Streamer(BaseStreamer):
             "id": id_,
             "config": audio_config
         }
+        self.skip_next=True
 
-    def put(self, token):
-        self.generated_tokens.append(token)
-        if len(self.generated_tokens) % self.chunk_size == 0:
+    def put(self, token_id):
+        if self.skip_next:
+            # The first generated "token" is actually the prompt and should be skipped.
+            self.skip_next = False
+            return
+
+        self.generated_tokens.extend(self.model.tokenizer.convert_ids_to_tokens(token_id))
+        semantic_tokens = [token for token in self.generated_tokens if "semantic" in token]
+        if len(semantic_tokens) and (len(semantic_tokens) % self.chunk_size == 0):
             self.generate_audio()
 
     def end(self):
         self.generate_audio()
 
     def generate_audio(self):
-        generated_latents = torch.cat(self.all_latents, dim=1)[:, -len(self.generated_tokens):]
-        with torch.no_grad():
-            generated_audio = self.decoder(generated_latents, g=self.speaker_embedding)
+        predicts = ''.join(self.generated_tokens)
 
-        bytes_ = generated_audio.squeeze().cpu().numpy().tobytes()
+        # Extract semantic token IDs from the generated text
+        pred_semantic_ids = (
+            torch.tensor([int(token) for token in re.findall(r"bicodec_semantic_(\d+)", predicts)])
+            .long()
+            .unsqueeze(0)
+        )
+
+        global_token_ids = (
+            torch.tensor([int(token) for token in re.findall(r"bicodec_global_(\d+)", predicts)])
+            .long()
+            .unsqueeze(0)
+            .unsqueeze(0)
+        )
+
+        with torch.no_grad():
+            # Convert semantic tokens back to waveform
+            wav = self.model.audio_tokenizer.detokenize(
+                global_token_ids.to(self.model.device).squeeze(0), pred_semantic_ids.to(self.model.device),
+            )
+
+        bytes_ = wav.tobytes()
         self.streams['client'].send(self.base_msg | {'audio': bytes_[self.len_generated_audio_bytes:]})
         self.len_generated_audio_bytes = len(bytes_)
 
@@ -98,7 +108,7 @@ class TTSServer(BaseServer):
         self.audio_config = {
             'format': 1,  # 1 is pyaudio.paFloat32.
             'channels': 1,
-            'rate': self.generation.model.decoder.output_sample_rate
+            'rate': self.generation.model.sample_rate
         }
 
     def _get_cutoff_idx(self, received: List[Message.DataDict]) -> int:
