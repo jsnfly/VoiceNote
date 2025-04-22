@@ -50,7 +50,8 @@ services:
       dockerfile: tts/Dockerfile
     container_name: voice_note_tts
     volumes:
-      - ../models/Spark-TTS-0.5B:/usr/src/app/models/Spark-TTS-0.5B:ro
+      - ../models/orpheus-3b-0.1-ft:/usr/src/app/models/orpheus-3b-0.1-ft:ro
+      - ../models/snac_24khz:/usr/src/app/models/snac_24khz:ro
       - ../logs:/usr/src/app/logs
     expose:
       - 12347

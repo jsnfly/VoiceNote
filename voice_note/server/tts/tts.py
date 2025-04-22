@@ -1,61 +1,53 @@
 import asyncio
 import re
-import sys
+import numpy as np
 import torch
-from pathlib import Path
 from transformers.generation.streamers import BaseStreamer
 from typing import Dict, List
 
 from server.base_server import BaseServer, ThreadExecutor
+from server.tts.orpheus_model import OrpheusModel, DEVICE
 from server.utils.message import Message
 from server.utils.streaming_connection import StreamingConnection
-
-sys.path.append('server/tts/Spark-TTS')
-from cli.SparkTTS import SparkTTS
-
-TTS_MODEL = './models/Spark-TTS-0.5B'
-SPEECH_CONFIG = {
-    'gender': 'male',
-    'pitch': 'high',
-    'speed': 'high'
-}
 
 
 class Generation(ThreadExecutor):
     def __init__(self):
         super().__init__()
-        self.model = SparkTTS(TTS_MODEL, torch.device("cuda"))
+        self.model = OrpheusModel()
 
     def blocking_fn(self, text: str, streams: Dict[str, StreamingConnection], id_: str, audio_config: dict) -> None:
-        prompt = self.model.process_prompt_control(text=text, **SPEECH_CONFIG)
-        model_inputs = self.model.tokenizer([prompt], return_tensors="pt").to(self.model.device)
-
-        streamer = Streamer(streams, id_, audio_config, self.model, chunk_size=30)
-        self.model.model.generate(
-            **model_inputs,
-            max_new_tokens=3000,
-            do_sample=True,
-            top_k=50,
-            top_p=0.95,
-            temperature=0.8,
-            streamer=streamer
+        voice = "tara"
+        prompt = (
+            "<custom_token_3><|begin_of_text|>"
+            f"{voice}: {text}"
+            "<|eot_id|><custom_token_4><custom_token_5><custom_token_1>"
+        )
+        model_inputs = self.model.tokenizer([prompt], return_tensors="pt").to(self.model.llm.device)
+        self.model.llm.generate(
+            **model_inputs, max_new_tokens=2048, temperature=0.6, top_p=0.8, repetition_penalty=1.3,
+            eos_token_id=self.model.eos_token_id,
+            streamer=Streamer(streams, id_, audio_config, self.model, chunk_size=35)
         )
 
 
 class Streamer(BaseStreamer):
 
-    def __init__(self, streams, id_, audio_config, model, chunk_size):
+    def __init__(self, streams, id_, audio_config, model, chunk_size, overlap=14):
         self.streams = streams
-        self.chunk_size = chunk_size
         self.model = model
+
+        self.chunk_size = chunk_size
+        self.overlap = overlap
         self.generated_tokens = []
-        self.len_generated_audio_bytes = 0
+        self.used_tokens = []
+
+        self.skip_next=True
         self.base_msg = {
             "status": "GENERATING",
             "id": id_,
             "config": audio_config
         }
-        self.skip_next=True
 
     def put(self, token_id):
         if self.skip_next:
@@ -63,40 +55,33 @@ class Streamer(BaseStreamer):
             self.skip_next = False
             return
 
-        self.generated_tokens.extend(self.model.tokenizer.convert_ids_to_tokens(token_id))
-        semantic_tokens = [token for token in self.generated_tokens if "semantic" in token]
-        if len(semantic_tokens) and (len(semantic_tokens) % self.chunk_size == 0):
+        token = self.model.tokenizer.decode(token_id)
+        match = re.match(r"<custom_token_(\d+)>", token)
+        if match is not None:
+            self.generated_tokens.append(int(match.groups()[0]) - 10 - ((len(self.generated_tokens) % 7) * 4096))
+
+        if len(self.generated_tokens) and (len(self.generated_tokens) % self.chunk_size == 0):
             self.generate_audio()
 
     def end(self):
         self.generate_audio()
 
     def generate_audio(self):
-        predicts = ''.join(self.generated_tokens)
+        overlap_tokens = self.used_tokens[-self.overlap:]
+        new_tokens = self.generated_tokens[len(self.used_tokens):]
+        self.used_tokens.extend(new_tokens)
 
-        # Extract semantic token IDs from the generated text
-        pred_semantic_ids = (
-            torch.tensor([int(token) for token in re.findall(r"bicodec_semantic_(\d+)", predicts)])
-            .long()
-            .unsqueeze(0)
-        )
+        tokens = overlap_tokens + new_tokens
+        tokens = [t for t in tokens if 0 <= t < 4096]
+        tokens = torch.tensor(tokens, device=DEVICE)
 
-        global_token_ids = (
-            torch.tensor([int(token) for token in re.findall(r"bicodec_global_(\d+)", predicts)])
-            .long()
-            .unsqueeze(0)
-            .unsqueeze(0)
-        )
+        with torch.inference_mode():
+            audio = self.model.convert_to_audio(tokens)
+        audio = audio.detach().cpu().numpy()
+        audio = audio[self.overlap // 7 * 2048:]  # 7 tokens give 2048 audio values
 
-        with torch.no_grad():
-            # Convert semantic tokens back to waveform
-            wav = self.model.audio_tokenizer.detokenize(
-                global_token_ids.to(self.model.device).squeeze(0), pred_semantic_ids.to(self.model.device),
-            )
-
-        bytes_ = wav.tobytes()
-        self.streams['client'].send(self.base_msg | {'audio': bytes_[self.len_generated_audio_bytes:]})
-        self.len_generated_audio_bytes = len(bytes_)
+        bytes_ = (audio * 32767).astype(np.int16).tobytes()
+        self.streams['client'].send(self.base_msg | {'audio': bytes_})
 
 
 class TTSServer(BaseServer):
@@ -106,9 +91,9 @@ class TTSServer(BaseServer):
 
         self.eos_rx = re.compile(r"(\.(?:\s|\Z))")
         self.audio_config = {
-            'format': 1,  # 1 is pyaudio.paFloat32.
+            'format': 8,  # 8 is pyaudio.paInt16.
             'channels': 1,
-            'rate': self.generation.model.sample_rate
+            'rate': 24_000
         }
 
     def _get_cutoff_idx(self, received: List[Message.DataDict]) -> int:

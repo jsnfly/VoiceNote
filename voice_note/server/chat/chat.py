@@ -7,17 +7,17 @@ from server.base_server import BaseServer, ThreadExecutor
 from server.utils.streaming_connection import POLL_INTERVAL, StreamingConnection
 from server.utils.message import Message
 
-CHAT_MODEL = './models/chat/Mistral-Small-24B-Instruct-2501'
+CHAT_MODEL = './models/chat/gemma-3-4b-it'
 SYSTEM_PROMPT = """Your name is George. Your are an intelligent, witty and pragmatic assistant. You are part of a
 speech-to-speech pipeline, i.e. you can talk to the user directly. This means you should keep your answers concise,
 like in a real conversation."""
-TTS_URI = 'ws://tts:12347'
+TTS_URI = 'ws://localhost:12347'
 
 
 class Generation(ThreadExecutor):
     def __init__(self):
         super().__init__()
-        self.model = AutoModelForCausalLM.from_pretrained(CHAT_MODEL, local_files_only=True, load_in_4bit=True)
+        self.model = AutoModelForCausalLM.from_pretrained(CHAT_MODEL, local_files_only=True, torch_dtype="auto")
         self.model.cuda()
         self.tokenizer = AutoTokenizer.from_pretrained(CHAT_MODEL, local_files_only=True)
 
