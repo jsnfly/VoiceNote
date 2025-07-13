@@ -16,7 +16,7 @@ from cli.SparkTTS import SparkTTS
 TTS_MODEL = './models/Spark-TTS-0.5B'
 SPEECH_CONFIG = {
     'gender': 'male',
-    'pitch': 'high',
+    'pitch': 'low',
     'speed': 'high'
 }
 
@@ -25,6 +25,25 @@ class Generation(ThreadExecutor):
     def __init__(self):
         super().__init__()
         self.model = SparkTTS(TTS_MODEL, torch.device("cuda"))
+
+        # These to things seem to speed up inference by about 20%. Other compilation modes did not improve speed.
+        # Flash attention even made it slower
+        self.model.model.generation_config.cache_implementation = "static"
+
+        # TODO: Compiled models do unfortunately not play well with multithreading
+        self.model.model = torch.compile(self.model.model, mode="default")
+
+        # First inference takes more time so do one for warm up.
+        prompt = self.model.process_prompt_control(text="This is for warm up.", **SPEECH_CONFIG)
+        model_inputs = self.model.tokenizer([prompt], return_tensors="pt").to(self.model.device)
+        self.model.model.generate(
+            **model_inputs,
+            max_new_tokens=3000,
+            do_sample=True,
+            top_k=50,
+            top_p=0.95,
+            temperature=0.8,
+        )
 
     def blocking_fn(self, text: str, streams: Dict[str, StreamingConnection], id_: str, audio_config: dict) -> None:
         prompt = self.model.process_prompt_control(text=text, **SPEECH_CONFIG)

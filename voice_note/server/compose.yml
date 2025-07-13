@@ -30,7 +30,7 @@ services:
       dockerfile: chat/Dockerfile
     container_name: voice_note_chat
     volumes:
-      - ../models/chat/Mistral-Small-24B-Instruct-2501:/usr/src/app/models/chat/Mistral-Small-24B-Instruct-2501:ro
+      - ../models/chat/gemma-3-4b-it:/usr/src/app/models/chat/gemma-3-4b-it:ro
       - ../logs:/usr/src/app/logs
     expose:
       - 12346
