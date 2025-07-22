@@ -10,7 +10,7 @@ A voice application with two modes of operation:
 - Clone the model repositories to the `models` directory:
     1. Speech-to-text: https://huggingface.co/openai/whisper-medium
     2. Chat: https://huggingface.co/mistralai/Mistral-Small-24B-Instruct-2501
-    3. Text-to-Speech: https://huggingface.co/coqui/XTTS-v2
+    3. Text-to-Speech: https://huggingface.co/kyutai/tts-1.6b-en_fr, https://huggingface.co/kyutai/tts-voices
 
 - **For the python client** the requirements in `client/requirements.txt` must be installed. For PyAudio the dev
 libraries of PortAudio need to be installed (cf. `server/stt/Dockerfile`)

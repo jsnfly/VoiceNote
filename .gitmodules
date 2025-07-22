@@ -1,3 +1,0 @@
-[submodule "voice_note/server/tts/Spark-TTS"]
-	path = voice_note/server/tts/Spark-TTS
-	url = https://github.com/jsnfly/Spark-TTS.git

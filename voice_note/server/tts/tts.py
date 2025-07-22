@@ -1,152 +1,257 @@
 import asyncio
-import re
-import sys
-import torch
+from moshi.models.loaders import CheckpointInfo
+from moshi.models.tts import ConditionAttributes, Entry, LMGen, TTSModel
 from pathlib import Path
-from transformers.generation.streamers import BaseStreamer
-from typing import Dict, List
+import torch
+import typing as tp
 
-from server.base_server import BaseServer, ThreadExecutor
-from server.utils.message import Message
-from server.utils.streaming_connection import StreamingConnection
-
-sys.path.append('server/tts/Spark-TTS')
-from cli.SparkTTS import SparkTTS
-
-TTS_MODEL = './models/Spark-TTS-0.5B'
-SPEECH_CONFIG = {
-    'gender': 'male',
-    'pitch': 'low',
-    'speed': 'high'
-}
+from server.base_server import BaseServer
+from server.utils.streaming_connection import POLL_INTERVAL, StreamReset
 
 
-class Generation(ThreadExecutor):
-    def __init__(self):
-        super().__init__()
-        self.model = SparkTTS(TTS_MODEL, torch.device("cuda"))
+DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+MODEL_DIR = Path('./models/tts-1.6b-en_fr')
+VOICE_PATH = Path('./models/tts-voices/expresso/ex03-ex01_happy_001_channel1_334s.wav.1e68beda@240.safetensors')
 
-        # These to things seem to speed up inference by about 20%. Other compilation modes did not improve speed.
-        # Flash attention even made it slower
-        self.model.model.generation_config.cache_implementation = "static"
 
-        # TODO: Compiled models do unfortunately not play well with multithreading
-        self.model.model = torch.compile(self.model.model, mode="default")
+class AsyncTTSGenerator:
+    """
+    A class to handle TTS generation asynchronously.
 
-        # First inference takes more time so do one for warm up.
-        prompt = self.model.process_prompt_control(text="This is for warm up.", **SPEECH_CONFIG)
-        model_inputs = self.model.tokenizer([prompt], return_tensors="pt").to(self.model.device)
-        self.model.model.generate(
-            **model_inputs,
-            max_new_tokens=3000,
-            do_sample=True,
-            top_k=50,
-            top_p=0.95,
-            temperature=0.8,
+    It manages the model state and runs the generation loop in a background task,
+    allowing for streaming of text input and audio output.
+    """
+
+    def __init__(self, tts_model: TTSModel, condition_attributes: ConditionAttributes):
+        self.tts_model = tts_model
+        self.condition_attributes = condition_attributes
+        self.device = tts_model.lm.device
+
+        # Queues for communication with the generation loop
+        self.text_queue: asyncio.Queue[tp.Optional[Entry]] = asyncio.Queue()
+        self.audio_queue: asyncio.Queue[tp.Optional[torch.Tensor]] = asyncio.Queue()
+
+        # State for the generation loop
+        self.lm_gen: tp.Optional[LMGen] = None
+        self.state: tp.Optional[tp.Any] = None
+        self.offset = 0
+        self.generation_task: tp.Optional[asyncio.Task] = None
+        self.finished = False
+        self.first_chunk_processed = False
+
+    def _on_text_hook(self, text_tokens: torch.Tensor):
+        """Hook to inject our text tokens into the generation process."""
+        predicted_token = text_tokens.item()
+        assert self.state is not None
+
+        # If we are out of entries but more text might be coming,
+        # prevent the model from ending the generation prematurely.
+        if not self.state.entries and not self.state.queued and not self.finished:
+            if predicted_token == self.tts_model.machine.token_ids.new_word:
+                predicted_token = self.tts_model.machine.token_ids.pad
+
+        output_token, consumed_new_word = self.tts_model.machine.process(self.offset, self.state, predicted_token)
+        if consumed_new_word:
+            word, step = self.state.transcript[-1]
+            print(f"Step {step}: Model consumed word -> '{word}'")
+        text_tokens[0] = output_token
+
+    def _on_audio_hook(self, audio_tokens: torch.Tensor):
+        """Hook to handle initial audio delay."""
+        lm = self.tts_model.lm
+        machine = self.tts_model.machine
+        audio_offset = lm.audio_offset
+        delays = lm.delays
+        for q in range(audio_tokens.shape[1]):
+            delay = delays[q + audio_offset]
+            if self.offset < delay + self.tts_model.delay_steps:
+                audio_tokens[:, q] = machine.token_ids.zero
+
+    def _create_lm_gen(self) -> LMGen:
+        """Creates and configures the LMGen instance."""
+        assert self.tts_model.lm.condition_provider is not None
+        prepared = self.tts_model.lm.condition_provider.prepare([self.condition_attributes])
+        condition_tensors = self.tts_model.lm.condition_provider(prepared)
+
+        return LMGen(
+            self.tts_model.lm,
+            temp=self.tts_model.temp,
+            temp_text=self.tts_model.temp,
+            cfg_coef=self.tts_model.cfg_coef,
+            condition_tensors=condition_tensors,
+            on_text_hook=self._on_text_hook,
+            on_audio_hook=self._on_audio_hook,
         )
 
-    def blocking_fn(self, text: str, streams: Dict[str, StreamingConnection], id_: str, audio_config: dict) -> None:
-        prompt = self.model.process_prompt_control(text=text, **SPEECH_CONFIG)
-        model_inputs = self.model.tokenizer([prompt], return_tensors="pt").to(self.model.device)
+    async def _generation_loop(self):
+        """The main background task for generating audio."""
+        self.lm_gen = self._create_lm_gen()
+        self.state = self.tts_model.machine.new_state([])
+        self.offset = 0
+        mimi = self.tts_model.mimi
+        lm = self.tts_model.lm
+        machine = self.tts_model.machine
 
-        streamer = Streamer(streams, id_, audio_config, self.model, chunk_size=30)
-        self.model.model.generate(
-            **model_inputs,
-            max_new_tokens=3000,
-            do_sample=True,
-            top_k=50,
-            top_p=0.95,
-            temperature=0.8,
-            streamer=streamer
-        )
+        try:
+            with self.lm_gen.streaming(batch_size=1), mimi.streaming(batch_size=1):
+                while True:
+                    # If there's no work to do, wait for more text.
+                    # "Work" means having text in the queue, or having entries to process.
+                    if self.text_queue.empty() and not self.state.entries and not self.state.queued and not self.finished:
+                        await asyncio.sleep(0.01)
+                        continue
 
+                    # Check for new text entries to add to the state machine
+                    while not self.text_queue.empty():
+                        entry = self.text_queue.get_nowait()
+                        if entry is None:
+                            # Sentinel from finish() was received. We don't need to do anything with it,
+                            # as self.finished is the source of truth.
+                            self.text_queue.put_nowait(None) # Put back for any other logic that might check it.
+                            break
+                        assert self.state is not None
+                        self.state.entries.append(entry)
 
-class Streamer(BaseStreamer):
+                    # Check for termination conditions
+                    no_pending_entries = not self.state.entries and not self.state.queued
+                    end_signaled = self.state.end_step is not None
 
-    def __init__(self, streams, id_, audio_config, model, chunk_size):
-        self.streams = streams
-        self.chunk_size = chunk_size
-        self.model = model
-        self.generated_tokens = []
-        self.len_generated_audio_bytes = 0
-        self.base_msg = {
-            "status": "GENERATING",
-            "id": id_,
-            "config": audio_config
-        }
-        self.skip_next=True
+                    if self.finished and no_pending_entries and end_signaled:
+                        if self.offset >= self.state.end_step + self.tts_model.delay_steps + self.tts_model.final_padding:
+                            break
 
-    def put(self, token_id):
-        if self.skip_next:
-            # The first generated "token" is actually the prompt and should be skipped.
-            self.skip_next = False
+                    # Generate one step
+                    with torch.no_grad():
+                        missing_streams = lm.n_q - lm.dep_q
+                        input_tokens = torch.full((1, missing_streams, 1), machine.token_ids.zero, dtype=torch.long,
+                                                  device=self.device)
+                        frame = self.lm_gen.step(input_tokens)
+
+                        if frame is not None:
+                            audio_codes = frame[:, 1:, :]
+                            if (audio_codes < 0).any():
+                                pcm = torch.zeros(mimi.frame_size, device=self.device)
+                            else:
+                                pcm = mimi.decode(audio_codes)
+                                pcm = torch.clip(pcm.squeeze(0).squeeze(0), -1, 1)
+                            await self.audio_queue.put(pcm)
+
+                    self.offset += 1
+                    await asyncio.sleep(0.01)  # Yield control
+        except asyncio.CancelledError:
+            print("Generation loop cancelled.")
+        finally:
+            await self.audio_queue.put(None)  # Sentinel to signal end of audio
+
+    async def start(self):
+        """Starts the generation background task."""
+        if self.generation_task and not self.generation_task.done():
             return
+        self.generation_task = asyncio.create_task(self._generation_loop())
 
-        self.generated_tokens.extend(self.model.tokenizer.convert_ids_to_tokens(token_id))
-        semantic_tokens = [token for token in self.generated_tokens if "semantic" in token]
-        if len(semantic_tokens) and (len(semantic_tokens) % self.chunk_size == 0):
-            self.generate_audio()
+    async def add_text(self, text: str):
+        """Adds a piece of text to be synthesized."""
+        print(f"---> Streaming in text: '{text}'")
+        entries = self.tts_model.prepare_script([text], padding_between=1)
 
-    def end(self):
-        self.generate_audio()
+        if not self.first_chunk_processed:
+            if entries:
+                self.first_chunk_processed = True
+        else:
+            # This is a subsequent chunk, remove the speaker token that was added by prepare_script.
+            if entries and entries[0].tokens:
+                token_ids = self.tts_model.machine.token_ids
+                if entries[0].tokens[0] in [token_ids.main, token_ids.other]:
+                    entries[0].tokens.pop(0)
 
-    def generate_audio(self):
-        predicts = ''.join(self.generated_tokens)
+        for entry in entries:
+            await self.text_queue.put(entry)
 
-        # Extract semantic token IDs from the generated text
-        pred_semantic_ids = (
-            torch.tensor([int(token) for token in re.findall(r"bicodec_semantic_(\d+)", predicts)])
-            .long()
-            .unsqueeze(0)
-        )
+    async def finish(self):
+        """Signals that no more text will be added."""
+        self.finished = True
+        await self.text_queue.put(None)
 
-        global_token_ids = (
-            torch.tensor([int(token) for token in re.findall(r"bicodec_global_(\d+)", predicts)])
-            .long()
-            .unsqueeze(0)
-            .unsqueeze(0)
-        )
+    async def get_audio_chunk(self) -> tp.Optional[torch.Tensor]:
+        """Retrieves the next available chunk of audio."""
+        return await self.audio_queue.get()
 
-        with torch.no_grad():
-            # Convert semantic tokens back to waveform
-            wav = self.model.audio_tokenizer.detokenize(
-                global_token_ids.to(self.model.device).squeeze(0), pred_semantic_ids.to(self.model.device),
-            )
+    async def restart(self):
+        """Stops the current generation and resets the state for a new one."""
+        print("\nRestarting generator...")
+        if self.generation_task:
+            self.generation_task.cancel()
+            try:
+                await self.generation_task
+            except asyncio.CancelledError:
+                pass
+            self.generation_task = None
 
-        bytes_ = wav.tobytes()
-        self.streams['client'].send(self.base_msg | {'audio': bytes_[self.len_generated_audio_bytes:]})
-        self.len_generated_audio_bytes = len(bytes_)
+        # Clear queues
+        self.audio_queue = asyncio.Queue()
+        self.text_queue = asyncio.Queue()
+        self.finished = False
+        self.first_chunk_processed = False
+        await self.start()
 
 
 class TTSServer(BaseServer):
     def __init__(self, host: str, port: int):
         super().__init__("tts", host, port)
-        self.generation = Generation()
+        checkpoint_info = CheckpointInfo.from_hf_repo(
+            "DUMMY_REPO",  # Repo name is not used when all paths are local
+            moshi_weights=MODEL_DIR / "dsm_tts_1e68beda@240.safetensors",
+            mimi_weights=MODEL_DIR / "tokenizer-e351c8d8-checkpoint125.safetensors",
+            tokenizer=MODEL_DIR / "tokenizer_spm_8k_en_fr_audio.model",
+            config_path=MODEL_DIR / "config.json",
+        )
+        tts_model = TTSModel.from_checkpoint_info(checkpoint_info, n_q=32, temp=0.6, device=DEVICE)
+        condition_attributes = tts_model.make_condition_attributes([VOICE_PATH], cfg_coef=2.0)
+        self.generator = AsyncTTSGenerator(tts_model, condition_attributes)
 
-        self.eos_rx = re.compile(r"(\.(?:\s|\Z))")
         self.audio_config = {
             'format': 1,  # 1 is pyaudio.paFloat32.
             'channels': 1,
-            'rate': self.generation.model.sample_rate
+            'rate': tts_model.mimi.sample_rate
         }
 
-    def _get_cutoff_idx(self, received: List[Message.DataDict]) -> int:
-        idx = next((idx for idx in range(len(received)) if self._is_finished(received[:idx + 1])), -1) + 1
-        return idx
+    async def _handle_workload(self) -> None:
+        await self.generator.start()
 
-    def _is_finished(self, messages: List[Message.DataDict]) -> bool:
-        if messages[-1]['status'] == 'FINISHED':
-            return True
+        current_id = None
+        while True:
+            try:
+                received = self._recv_client_messages()
 
-        text = ''.join(msg['text'] for msg in messages)
-        return len(text.split()) > 4 and self.eos_rx.search(text)
+                # Discard data for a previous id. Necessary, because the StreamReset (and with that the clearing of
+                # `received`) happens only after it was attempted to send a response.
+                if len(received) > 1 and received[0]['id'] != received[-1]['id']:
+                    received = [data for data in received if data['id'] == received[-1]['id']]
 
-    async def _run_workload(self, received: List[Message.DataDict]) -> None:
-        text = ''.join(msg['text'] for msg in received)
-        print(f"{text}\n---")
-        await self.generation.run(text, self.streams, received[0]['id'], self.audio_config)
-        if received[-1]['status'] == 'FINISHED':
-            self.streams['client'].send({'audio': b'', 'status': 'FINISHED', 'id': received[0]['id']})
+                if len(received) > 0:
+                    current_id = received[0]['id']
+                    await self.generator.add_text(''.join(msg['text'] for msg in received))
+                    if received[-1]['status'] == 'FINISHED':
+                        await self.generator.finish()
+                    received = []
+
+                if current_id is not None and not self.generator.audio_queue.empty():
+                    audio = await self.generator.get_audio_chunk()
+                    if audio is None:
+                        self.streams['client'].send({'audio': b'', 'status': 'FINISHED', 'id': current_id})
+                        await self.generator.restart()
+                        current_id = None
+                    else:
+                        bytes_ = audio.cpu().numpy().tobytes()
+                        self.streams['client'].send({'audio': bytes_, 'status': 'GENERATING', 'id': current_id,
+                                                     'config': self.audio_config})
+
+                await asyncio.sleep(0.01)
+            except StreamReset as e:
+                self.generator.restart()
+                current_id = None
+            except ConnectionError:
+                break
 
 
 if __name__ == '__main__':
