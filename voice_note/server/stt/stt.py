@@ -5,12 +5,12 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Union
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
-from server.base_server import BaseServer, ThreadExecutor
+from server.base_server import BaseServer, ThreadExecutor, POLL_INTERVAL
 from server.utils.audio import AudioConfig
-from server.utils.message import Message
+from server.utils.message import DataDict
 from server.utils.misc import BASE_DIR
 from server.utils.sample import Sample
-from server.utils.streaming_connection import POLL_INTERVAL
+from server.utils.streaming_connection import StreamReset
 
 SAVE_DIR = BASE_DIR / 'outputs'
 MODEL_DIR = BASE_DIR / 'models/whisper-medium'
@@ -34,7 +34,7 @@ class Transcription(ThreadExecutor):
         sample = Sample([bytes_], AudioConfig(**audio_config))
         sample.transcribe(self.model, self.processor, LANG)
         save_path = sample.save(SAVE_DIR / topic)
-        print(sample.result)
+        print(f"Transcription: {sample.result}")
         return sample.result, save_path
 
 
@@ -42,30 +42,66 @@ class STTServer(BaseServer):
     def __init__(self, host: str, port: int, chat_uri: Union[str, None] = None):
         super().__init__("stt", host, port)
         self.transcription = Transcription()
+        if chat_uri:
+            self.connections['chat'] = chat_uri
 
-        if chat_uri is not None:
-            self.connections = {'chat': chat_uri}
+    async def _main_loop(self) -> None:
+        buffer: List[DataDict] = []
+        workload_task = None
 
-    def _recv_client_messages(self) -> List[Message.DataDict]:
-        audio_messages = []
-        for msg in super()._recv_client_messages():
-            action = msg.get('action')
-            if action == 'DELETE':
-                self.delete_entry(msg['save_path'])
-            elif action == 'WRONG':
-                self.add_to_metadata(msg['save_path'], {'transcription_error': True})
-            elif action == 'NEW CHAT':
-                if 'chat' in self.streams:
-                    self.streams['chat'].reset(msg['id'])
-                self.streams['chat'].send(msg)
-            else:
-                audio_messages.append(msg)
-        return audio_messages
+        while True:
+            try:
+                # Prioritize processing incoming messages
+                new_messages = self.streams['client'].recv()
+                for msg in new_messages:
+                    # Handle session control messages immediately
+                    if msg.get('action') == 'DELETE':
+                        self.delete_entry(msg['save_path'])
+                        continue
+                    elif msg.get('action') == 'WRONG':
+                        self.add_to_metadata(msg['save_path'], {'transcription_error': True})
+                        continue
+                    elif msg.get('action') == 'NEW CHAT':
+                        if 'chat' in self.streams:
+                            self.streams['chat'].reset(msg['id'])
+                            self.streams['chat'].send(msg)
+                        continue
 
-    def _get_cutoff_idx(self, received: List[Message.DataDict]) -> int:
-        return next((idx for idx, msg in enumerate(received) if msg['status'] == 'FINISHED'), -1) + 1
+                    # If a new session starts, clear buffer and cancel ongoing work
+                    if buffer and msg['id'] != buffer[0]['id']:
+                        print("New session started, clearing buffer.")
+                        if workload_task and not workload_task.done():
+                            workload_task.cancel()
+                        buffer.clear()
 
-    async def _run_workload(self, messages: List[Message.DataDict]) -> None:
+                    buffer.append(msg)
+
+                # Check if a full workload is ready to be processed
+                if buffer and buffer[-1]['status'] == 'FINISHED':
+                    # Reset downstream connections for the new workload
+                    if 'chat' in self.streams:
+                        self.streams['chat'].reset(buffer[0]['id'])
+
+                    workload_task = asyncio.create_task(self._run_workload(buffer))
+                    await workload_task
+                    buffer = []
+
+                await asyncio.sleep(POLL_INTERVAL)
+
+            except StreamReset as e:
+                print(f"Stream reset requested for id {e.id}. Clearing buffer.")
+                if workload_task and not workload_task.done():
+                    workload_task.cancel()
+                buffer.clear()
+                # Propagate reset to other streams
+                for key, stream in self.streams.items():
+                    if key != 'client':
+                        stream.reset(e.id)
+            except ConnectionError:
+                print("Connection lost. Exiting main loop.")
+                break
+
+    async def _run_workload(self, messages: List[DataDict]) -> None:
         assert messages[0]['status'] == 'INITIALIZING'
 
         bytes_ = b''.join([msg.get('audio', b'') for msg in messages])
@@ -80,41 +116,38 @@ class STTServer(BaseServer):
 
     @staticmethod
     def delete_entry(save_path: str) -> None:
-        save_path = Path(save_path)
-        if not save_path.exists():
+        path = Path(save_path)
+        if not path.exists():
             return
-
-        for file in save_path.iterdir():
+        for file in path.iterdir():
             file.unlink()
-        save_path.rmdir()
-        print(f"Deleted {save_path}.")
+        path.rmdir()
+        print(f"Deleted {path}.")
 
     @staticmethod
     def add_to_metadata(save_path: str, data: Dict) -> None:
-        save_path = Path(save_path)
-        if not save_path.exists():
+        path = Path(save_path)
+        if not path.exists():
             return
+        metadata_path = path / 'metadata.json'
+        metadata = json.loads(metadata_path.read_text()) if metadata_path.exists() else {}
+        metadata.update(data)
+        metadata_path.write_text(json.dumps(metadata, sort_keys=True, indent=4, ensure_ascii=False))
 
-        metadata_path = save_path / 'metadata.json'
-        if metadata_path.exists():
-            with metadata_path.open() as f:
-                metadata = json.load(f)
-        else:
-            metadata = {}
-
-        metadata = metadata | data
-        with metadata_path.open('w') as f:
-            json.dump(metadata, f, sort_keys=True, indent=4, ensure_ascii=False)
-
-    async def get_chat_response(self, transcription_result: Message.DataDict) -> None:
+    async def get_chat_response(self, transcription_result: DataDict) -> None:
         self.streams['chat'].send(transcription_result)
         while True:
-            for msg in self.streams['chat'].recv():
-                self.streams['client'].send(msg | {'save_path': transcription_result['save_path']})
-                if msg["status"] == "FINISHED":
-                    return
-            await asyncio.sleep(POLL_INTERVAL)
+            try:
+                for msg in self.streams['chat'].recv():
+                    self.streams['client'].send(msg | {'save_path': transcription_result['save_path']})
+                    if msg["status"] == "FINISHED":
+                        return
+                await asyncio.sleep(POLL_INTERVAL)
+            except ConnectionError:
+                print("Connection to chat server lost during response streaming.")
+                break
 
 
 if __name__ == '__main__':
-    asyncio.run(STTServer('0.0.0.0', '12345', CHAT_URI).serve_forever())
+    server = STTServer('0.0.0.0', 12345, CHAT_URI)
+    asyncio.run(server.serve_forever())

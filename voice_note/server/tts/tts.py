@@ -5,8 +5,8 @@ from pathlib import Path
 import torch
 import typing as tp
 
-from server.base_server import BaseServer
-from server.utils.streaming_connection import POLL_INTERVAL, StreamReset
+from server.base_server import BaseServer, POLL_INTERVAL
+from server.utils.streaming_connection import StreamReset
 
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -215,44 +215,86 @@ class TTSServer(BaseServer):
             'rate': tts_model.mimi.sample_rate
         }
 
-    async def _handle_workload(self) -> None:
+    async def _main_loop(self) -> None:
         await self.generator.start()
 
+        input_task = asyncio.create_task(self._handle_input())
+        output_task = asyncio.create_task(self._handle_output())
+
+        done, pending = await asyncio.wait(
+            [input_task, output_task],
+            return_when=asyncio.FIRST_COMPLETED
+        )
+
+        for task in done:
+            if task.exception():
+                print(f"Error in TTS main loop: {task.exception()}")
+
+        for task in pending:
+            task.cancel()
+
+    async def _handle_input(self):
+        """Handles incoming text from the client."""
+        client_stream = self.streams['client']
+        while True:
+            try:
+                msg = await client_stream.received_q.get()
+
+                if self.generator.finished:
+                    await self.generator.restart()
+
+                await self.generator.add_text(msg['text'])
+                if msg['status'] == 'FINISHED':
+                    await self.generator.finish()
+
+                client_stream.received_q.task_done()
+
+            except StreamReset:
+                print("TTS input handler received stream reset.")
+                await self.generator.restart()
+            except ConnectionError:
+                print("Connection lost in TTS input handler.")
+                break
+
+    async def _handle_output(self):
+        """Handles sending generated audio back to the client."""
+        client_stream = self.streams['client']
         current_id = None
         while True:
             try:
-                received = self._recv_client_messages()
+                # This will block until audio is available or the generator is done
+                audio_chunk = await self.generator.get_audio_chunk()
 
-                # Discard data for a previous id. Necessary, because the StreamReset (and with that the clearing of
-                # `received`) happens only after it was attempted to send a response.
-                if len(received) > 1 and received[0]['id'] != received[-1]['id']:
-                    received = [data for data in received if data['id'] == received[-1]['id']]
+                # The ID comes from the last received message
+                if client_stream.communication_id:
+                    current_id = client_stream.communication_id
 
-                if len(received) > 0:
-                    current_id = received[0]['id']
-                    await self.generator.add_text(''.join(msg['text'] for msg in received))
-                    if received[-1]['status'] == 'FINISHED':
-                        await self.generator.finish()
-                    received = []
+                if audio_chunk is None:  # End of generation
+                    if current_id:
+                        client_stream.send({'audio': b'', 'status': 'FINISHED', 'id': current_id})
+                    await self.generator.restart()
+                    current_id = None
+                else:
+                    if current_id:
+                        bytes_ = audio_chunk.cpu().numpy().tobytes()
+                        client_stream.send({
+                            'audio': bytes_,
+                            'status': 'GENERATING',
+                            'id': current_id,
+                            'config': self.audio_config
+                        })
 
-                if current_id is not None and not self.generator.audio_queue.empty():
-                    audio = await self.generator.get_audio_chunk()
-                    if audio is None:
-                        self.streams['client'].send({'audio': b'', 'status': 'FINISHED', 'id': current_id})
-                        await self.generator.restart()
-                        current_id = None
-                    else:
-                        bytes_ = audio.cpu().numpy().tobytes()
-                        self.streams['client'].send({'audio': bytes_, 'status': 'GENERATING', 'id': current_id,
-                                                     'config': self.audio_config})
+                self.generator.audio_queue.task_done()
 
-                await asyncio.sleep(POLL_INTERVAL)
-            except StreamReset as e:
+            except StreamReset:
+                print("TTS output handler received stream reset.")
                 await self.generator.restart()
                 current_id = None
             except ConnectionError:
+                print("Connection lost in TTS output handler.")
                 break
 
 
 if __name__ == '__main__':
-    asyncio.run(TTSServer('0.0.0.0', '12347').serve_forever())
+    server = TTSServer('0.0.0.0', 12347)
+    asyncio.run(server.serve_forever())
