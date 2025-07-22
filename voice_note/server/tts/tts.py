@@ -98,7 +98,7 @@ class AsyncTTSGenerator:
                     # If there's no work to do, wait for more text.
                     # "Work" means having text in the queue, or having entries to process.
                     if self.text_queue.empty() and not self.state.entries and not self.state.queued and not self.finished:
-                        await asyncio.sleep(0.01)
+                        await asyncio.sleep(POLL_INTERVAL)
                         continue
 
                     # Check for new text entries to add to the state machine
@@ -137,7 +137,7 @@ class AsyncTTSGenerator:
                             await self.audio_queue.put(pcm)
 
                     self.offset += 1
-                    await asyncio.sleep(0.01)  # Yield control
+                    await asyncio.sleep(POLL_INTERVAL)  # Yield control
         except asyncio.CancelledError:
             print("Generation loop cancelled.")
         finally:
@@ -246,9 +246,9 @@ class TTSServer(BaseServer):
                         self.streams['client'].send({'audio': bytes_, 'status': 'GENERATING', 'id': current_id,
                                                      'config': self.audio_config})
 
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(POLL_INTERVAL)
             except StreamReset as e:
-                self.generator.restart()
+                await self.generator.restart()
                 current_id = None
             except ConnectionError:
                 break
