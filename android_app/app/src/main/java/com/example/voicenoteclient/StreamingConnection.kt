@@ -67,23 +67,26 @@ class StreamingConnection(
         }
     }
 
-    fun receive(): List<Map<String, Any?>> = runBlocking {
+    suspend fun receive(): List<Map<String, Any?>> {
         if (closed) throw ConnectionClosedException("Connection is closed")
         val received = mutableListOf<Map<String, Any?>>()
 
+        // Non-blocking read of all currently available messages
         while (!receivedChannel.isEmpty) {
             received.add(receivedChannel.receive())
         }
-        received
+        return received
     }
 
-    fun reset(id: String, propagate: Boolean = true) {
+    suspend fun reset(id: String, propagate: Boolean = true) {
         communicationID = id
 
-        // Clear queues.
-        runBlocking {
-            while (!receivedChannel.isEmpty) { receivedChannel.receive() }
-            while (!sendChannel.isEmpty) { sendChannel.receive() }
+        // Clear queues non-blockingly
+        while (!receivedChannel.isEmpty) {
+            receivedChannel.receive()
+        }
+        while (!sendChannel.isEmpty) {
+            sendChannel.receive()
         }
 
         if (propagate) {

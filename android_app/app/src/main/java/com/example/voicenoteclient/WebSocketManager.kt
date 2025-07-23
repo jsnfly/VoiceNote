@@ -7,7 +7,11 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import StreamingConnection
 
-class WebSocketManager(private val host: String, private val port: Int) {
+class WebSocketManager(
+    private val host: String,
+    private val port: Int,
+    private val scope: CoroutineScope
+) {
     private val client = HttpClient {
         install(WebSockets)
     }
@@ -21,8 +25,7 @@ class WebSocketManager(private val host: String, private val port: Int) {
     fun isConnectionInitialized(): Boolean = ::connection.isInitialized
 
     private fun setupWebSocketConnection() {
-        // Using CoroutineScope tied to application lifecycle, or some long-lived scope
-        GlobalScope.launch {
+        scope.launch {
             client.webSocket(host = host, port = port) {
                 connection = StreamingConnection(this, this@launch)
                 connection.run()
