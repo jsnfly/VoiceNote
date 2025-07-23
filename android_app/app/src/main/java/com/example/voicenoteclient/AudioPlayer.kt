@@ -3,10 +3,10 @@ package com.example.voicenoteclient
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.media.AudioManager
-import java.util.concurrent.BlockingQueue
-import java.util.concurrent.LinkedBlockingQueue
-import kotlin.concurrent.thread
-import android.util.Log
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
 
 fun FloatArray.toShortArray(): ShortArray {
     return this.map { sample ->
@@ -17,12 +17,12 @@ fun FloatArray.toShortArray(): ShortArray {
         (clampedSample * Short.MAX_VALUE).toInt().toShort()
     }.toShortArray()
 }
-class AudioPlayer {
+class AudioPlayer(private val scope: CoroutineScope) {
 
     private var audioTrack: AudioTrack? = null
     private var isPlaying = false
     private val sampleRate = 24000  // TODO: Consider moving this to a configuration or dynamic setting
-    private val audioQueue: BlockingQueue<ShortArray> = LinkedBlockingQueue()
+    private val audioQueue: Channel<ShortArray> = Channel(Channel.UNLIMITED)
     private val bufferSize = AudioTrack.getMinBufferSize(
         sampleRate,
         AudioFormat.CHANNEL_OUT_MONO,
@@ -38,23 +38,15 @@ class AudioPlayer {
             bufferSize,
             AudioTrack.MODE_STREAM
         )
-        startAudioThread()
+        startAudioJob()
     }
 
-    private fun startAudioThread() {
-        thread(start = true) {
-            while (true) {
-                try {
-                    if (isPlaying) {
-                        val data = audioQueue.take()
-                        val length = data.size
-                        Log.d("XXXXX", "Length2 $length")
-                        if (data.isEmpty()) break  // Empty array can signal to terminate the thread
-
-                        audioTrack?.write(data, 0, data.size)
-                    }
-                } catch (e: InterruptedException) {
-                    Thread.currentThread().interrupt()
+    private fun startAudioJob() {
+        scope.launch(Dispatchers.IO) {
+            for (data in audioQueue) {
+                if (isPlaying) {
+                    if (data.isEmpty()) break
+                    audioTrack?.write(data, 0, data.size)
                 }
             }
         }
@@ -62,9 +54,9 @@ class AudioPlayer {
 
     fun playAudio(audioData: FloatArray) {
         val shortArray = audioData.toShortArray()
-        val length = shortArray.size
-        Log.d("XXXXX", "Length1 $length")
-        audioQueue.put(shortArray)
+        scope.launch {
+            audioQueue.send(shortArray)
+        }
         if (!isPlaying) {
             audioTrack?.play()
             isPlaying = true
@@ -88,6 +80,9 @@ class AudioPlayer {
 
     fun terminateAudioProcessing() {
         stopAudio()
-        audioQueue.put(shortArrayOf())  // Use an empty array to signal the thread to exit
+        scope.launch {
+            audioQueue.send(shortArrayOf()) // Signal to terminate
+        }
+        audioQueue.close()
     }
 }
