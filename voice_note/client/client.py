@@ -5,7 +5,8 @@ from uuid import uuid4
 import websockets
 from functools import lru_cache
 from server.utils.audio import audio
-from server.utils.streaming_connection import StreamingConnection, POLL_INTERVAL
+from server.utils.streaming_connection import StreamingConnection
+from server.base_server import POLL_INTERVAL
 
 INPUT_DEVICE_INDEX = None
 AUDIO_FORMAT = pyaudio.paInt16  # https://en.wikipedia.org/wiki/Audio_bit_depth

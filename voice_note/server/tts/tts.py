@@ -6,7 +6,7 @@ import torch
 import typing as tp
 
 from server.base_server import BaseServer, POLL_INTERVAL
-from server.utils.streaming_connection import StreamReset
+from server.utils.streaming_connection import RESET_SENTINEL
 
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -26,16 +26,16 @@ class AsyncTTSGenerator:
         self.tts_model = tts_model
         self.condition_attributes = condition_attributes
         self.device = tts_model.lm.device
+        self.generation_task: tp.Optional[asyncio.Task] = None
+        self._reset_state()
 
-        # Queues for communication with the generation loop
+    def _reset_state(self):
+        """Resets the generator's internal state."""
         self.text_queue: asyncio.Queue[tp.Optional[Entry]] = asyncio.Queue()
         self.audio_queue: asyncio.Queue[tp.Optional[torch.Tensor]] = asyncio.Queue()
-
-        # State for the generation loop
         self.lm_gen: tp.Optional[LMGen] = None
         self.state: tp.Optional[tp.Any] = None
         self.offset = 0
-        self.generation_task: tp.Optional[asyncio.Task] = None
         self.finished = False
         self.first_chunk_processed = False
 
@@ -44,8 +44,6 @@ class AsyncTTSGenerator:
         predicted_token = text_tokens.item()
         assert self.state is not None
 
-        # If we are out of entries but more text might be coming,
-        # prevent the model from ending the generation prematurely.
         if not self.state.entries and not self.state.queued and not self.finished:
             if predicted_token == self.tts_model.machine.token_ids.new_word:
                 predicted_token = self.tts_model.machine.token_ids.pad
@@ -95,24 +93,18 @@ class AsyncTTSGenerator:
         try:
             with self.lm_gen.streaming(batch_size=1), mimi.streaming(batch_size=1):
                 while True:
-                    # If there's no work to do, wait for more text.
-                    # "Work" means having text in the queue, or having entries to process.
                     if self.text_queue.empty() and not self.state.entries and not self.state.queued and not self.finished:
                         await asyncio.sleep(POLL_INTERVAL)
                         continue
 
-                    # Check for new text entries to add to the state machine
                     while not self.text_queue.empty():
                         entry = self.text_queue.get_nowait()
                         if entry is None:
-                            # Sentinel from finish() was received. We don't need to do anything with it,
-                            # as self.finished is the source of truth.
-                            self.text_queue.put_nowait(None) # Put back for any other logic that might check it.
+                            self.text_queue.put_nowait(None)
                             break
                         assert self.state is not None
                         self.state.entries.append(entry)
 
-                    # Check for termination conditions
                     no_pending_entries = not self.state.entries and not self.state.queued
                     end_signaled = self.state.end_step is not None
 
@@ -120,7 +112,6 @@ class AsyncTTSGenerator:
                         if self.offset >= self.state.end_step + self.tts_model.delay_steps + self.tts_model.final_padding:
                             break
 
-                    # Generate one step
                     with torch.no_grad():
                         missing_streams = lm.n_q - lm.dep_q
                         input_tokens = torch.full((1, missing_streams, 1), machine.token_ids.zero, dtype=torch.long,
@@ -137,11 +128,11 @@ class AsyncTTSGenerator:
                             await self.audio_queue.put(pcm)
 
                     self.offset += 1
-                    await asyncio.sleep(POLL_INTERVAL)  # Yield control
+                    await asyncio.sleep(POLL_INTERVAL)
         except asyncio.CancelledError:
             print("Generation loop cancelled.")
         finally:
-            await self.audio_queue.put(None)  # Sentinel to signal end of audio
+            await self.audio_queue.put(None)
 
     async def start(self):
         """Starts the generation background task."""
@@ -158,7 +149,6 @@ class AsyncTTSGenerator:
             if entries:
                 self.first_chunk_processed = True
         else:
-            # This is a subsequent chunk, remove the speaker token that was added by prepare_script.
             if entries and entries[0].tokens:
                 token_ids = self.tts_model.machine.token_ids
                 if entries[0].tokens[0] in [token_ids.main, token_ids.other]:
@@ -185,13 +175,8 @@ class AsyncTTSGenerator:
                 await self.generation_task
             except asyncio.CancelledError:
                 pass
-            self.generation_task = None
-
-        # Clear queues
-        self.audio_queue = asyncio.Queue()
-        self.text_queue = asyncio.Queue()
-        self.finished = False
-        self.first_chunk_processed = False
+        
+        self._reset_state()
         await self.start()
 
 
@@ -199,7 +184,7 @@ class TTSServer(BaseServer):
     def __init__(self, host: str, port: int):
         super().__init__("tts", host, port)
         checkpoint_info = CheckpointInfo.from_hf_repo(
-            "DUMMY_REPO",  # Repo name is not used when all paths are local
+            "DUMMY_REPO",
             moshi_weights=MODEL_DIR / "dsm_tts_1e68beda@240.safetensors",
             mimi_weights=MODEL_DIR / "tokenizer-e351c8d8-checkpoint125.safetensors",
             tokenizer=MODEL_DIR / "tokenizer_spm_8k_en_fr_audio.model",
@@ -210,26 +195,26 @@ class TTSServer(BaseServer):
         self.generator = AsyncTTSGenerator(tts_model, condition_attributes)
 
         self.audio_config = {
-            'format': 1,  # 1 is pyaudio.paFloat32.
+            'format': 1,
             'channels': 1,
             'rate': tts_model.mimi.sample_rate
         }
 
     async def _main_loop(self) -> None:
         await self.generator.start()
-
+        
         input_task = asyncio.create_task(self._handle_input())
         output_task = asyncio.create_task(self._handle_output())
 
         done, pending = await asyncio.wait(
-            [input_task, output_task],
+            [input_task, output_task], 
             return_when=asyncio.FIRST_COMPLETED
         )
 
         for task in done:
             if task.exception():
                 print(f"Error in TTS main loop: {task.exception()}")
-
+        
         for task in pending:
             task.cancel()
 
@@ -239,19 +224,18 @@ class TTSServer(BaseServer):
         while True:
             try:
                 msg = await client_stream.received_q.get()
-
-                if self.generator.finished:
+                
+                if msg is RESET_SENTINEL:
+                    print("TTS input handler received reset sentinel.")
                     await self.generator.restart()
+                    continue
 
                 await self.generator.add_text(msg['text'])
                 if msg['status'] == 'FINISHED':
                     await self.generator.finish()
-
+                
                 client_stream.received_q.task_done()
 
-            except StreamReset:
-                print("TTS input handler received stream reset.")
-                await self.generator.restart()
             except ConnectionError:
                 print("Connection lost in TTS input handler.")
                 break
@@ -262,18 +246,16 @@ class TTSServer(BaseServer):
         current_id = None
         while True:
             try:
-                # This will block until audio is available or the generator is done
                 audio_chunk = await self.generator.get_audio_chunk()
+                self.generator.audio_queue.task_done()
 
-                # The ID comes from the last received message
                 if client_stream.communication_id:
                     current_id = client_stream.communication_id
 
-                if audio_chunk is None:  # End of generation
+                if audio_chunk is None:
                     if current_id:
                         client_stream.send({'audio': b'', 'status': 'FINISHED', 'id': current_id})
-                    await self.generator.restart()
-                    current_id = None
+                    # Don't restart here, wait for the input loop to trigger it on a new message
                 else:
                     if current_id:
                         bytes_ = audio_chunk.cpu().numpy().tobytes()
@@ -284,12 +266,6 @@ class TTSServer(BaseServer):
                             'config': self.audio_config
                         })
 
-                self.generator.audio_queue.task_done()
-
-            except StreamReset:
-                print("TTS output handler received stream reset.")
-                await self.generator.restart()
-                current_id = None
             except ConnectionError:
                 print("Connection lost in TTS output handler.")
                 break

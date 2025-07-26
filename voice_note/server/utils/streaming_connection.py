@@ -11,6 +11,7 @@ from server.utils import message
 from server.utils.misc import BASE_DIR
 
 LOG_DIR = BASE_DIR / 'logs'
+RESET_SENTINEL = object()
 
 
 class StreamReset(Exception):
@@ -60,6 +61,7 @@ class StreamingConnection:
 
             if data.get('status') == 'RESET':
                 self.reset(data['id'], propagate=False)
+                await self.received_q.put(RESET_SENTINEL)
             elif self._is_valid_msg(data.get('id')):
                 await self.received_q.put(data)
             else:

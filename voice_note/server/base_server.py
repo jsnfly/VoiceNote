@@ -48,6 +48,7 @@ class BaseServer:
             await stream.close()
         self.streams.clear()
 
+        pending = []
         try:
             # Setup connections to other servers
             for key, uri in self.connections.items():
