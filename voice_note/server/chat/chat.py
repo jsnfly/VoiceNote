@@ -1,63 +1,19 @@
 import asyncio
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, TextStreamer
-from typing import Dict, List, Union
+from typing import List, Union
+from vllm.engine.async_llm_engine import AsyncLLMEngine
+from vllm.engine.arg_utils import AsyncEngineArgs
+from vllm.sampling_params import SamplingParams
+from vllm import TokensPrompt
 
-from server.base_server import BaseServer, ThreadExecutor
-from server.utils.streaming_connection import POLL_INTERVAL, StreamingConnection
+from server.base_server import BaseServer
+from server.utils.streaming_connection import POLL_INTERVAL
 from server.utils.message import Message
 
-CHAT_MODEL = './models/chat/gemma-3-4b-it'
+CHAT_MODEL = './models/chat/Mistral-Nemo-Instruct-FP8-2407'
 SYSTEM_PROMPT = """Your name is George. Your are an intelligent, witty and pragmatic assistant. You are part of a
 speech-to-speech pipeline, i.e. you can talk to the user directly. This means you should keep your answers concise,
 like in a real conversation."""
 TTS_URI = 'ws://tts:12347'
-
-
-class Generation(ThreadExecutor):
-    def __init__(self):
-        super().__init__()
-        self.model = AutoModelForCausalLM.from_pretrained(CHAT_MODEL, local_files_only=True, torch_dtype="auto")
-        self.model.cuda()
-        self.tokenizer = AutoTokenizer.from_pretrained(CHAT_MODEL, local_files_only=True)
-
-    def blocking_fn(self, inputs: torch.Tensor, streams: Dict[str, StreamingConnection], id_: str) -> str:
-        generation_config = self.model.generation_config
-        generation_config.max_length = 8192
-        streamer = Streamer(id_, streams, self.tokenizer, skip_prompt=True, skip_special_tokens=True)
-        self.model.generate(inputs, generation_config, streamer=streamer)
-        return streamer.result
-
-
-class Streamer(TextStreamer):
-    def __init__(
-        self,
-        id_: str,
-        streams: Dict[str, StreamingConnection],
-        tokenizer: "AutoTokenizer",
-        skip_prompt: bool = False,
-        **decode_kwargs
-    ):
-        super().__init__(tokenizer, skip_prompt, **decode_kwargs)
-        self.id = id_
-        self.streams = streams
-        self.result = ''
-
-    def on_finalized_text(self, text: str, stream_end: bool = False):
-        self.result += text
-        msg = {'status': 'FINISHED' if stream_end else 'GENERATING', 'text': text, 'id': self.id}
-
-        if 'tts' in self.streams:
-            self.streams['tts'].send(msg)
-
-            # In case of a StreamReset, it is raised here and generation is interrupted. No need to use a cancellation
-            # Event.
-            # If TTS is used, the chat server should never send 'FINISHED' and only the TTS server should.
-            self.streams['client'].send(msg | {'status': 'GENERATING'})
-
-            [self.streams['client'].send(msg) for msg in self.streams['tts'].recv()]
-        else:
-            self.streams['client'].send(msg)
 
 
 class ChatServer(BaseServer):
@@ -67,10 +23,20 @@ class ChatServer(BaseServer):
         self.history = []
         if SYSTEM_PROMPT:
             self.history.append({'role': 'system', 'content': SYSTEM_PROMPT})
-        self.generation = Generation()
+
+        engine_args = AsyncEngineArgs(model=CHAT_MODEL, tensor_parallel_size=1, gpu_memory_utilization=0.66,
+                                      load_format='mistral', tokenizer_mode='mistral', config_format='mistral',
+                                      max_model_len=12384, max_num_seqs=2)
+        self.engine = AsyncLLMEngine.from_engine_args(engine_args)
+        self.tokenizer = None  # Initialized in `#serve_forever`
 
         if tts_uri is not None:
             self.connections = {'tts': tts_uri}
+
+    async def serve_forever(self) -> None:
+        """Initializes the tokenizer and then starts the server."""
+        self.tokenizer = await self.engine.get_tokenizer()
+        await super().serve_forever()
 
     def _recv_client_messages(self) -> List[Message.DataDict]:
         text_messages = []
@@ -86,20 +52,51 @@ class ChatServer(BaseServer):
 
     async def _run_workload(self, received: List[Message.DataDict]) -> None:
         history = self.history + [{'role': 'user', 'content': received[0]['text']}]
-        inputs = self.generation.tokenizer.apply_chat_template(history, add_generation_prompt=True,
-                                                               return_tensors='pt')
-        result = await self.generation.run(inputs.cuda(), self.streams, received[0]['id'])
+        prompt_token_ids = self.tokenizer.apply_chat_template(history, add_generation_prompt=True, tokenize=False)
+        print("PROMPT TOKEN IDS")
+        print(prompt_token_ids)
+
+        request_id = received[0]['id']
+        sampling_params = SamplingParams(max_tokens=8192)
+        results_generator = self.engine.generate(prompt=TokensPrompt(prompt_token_ids=prompt_token_ids), sampling_params=sampling_params,
+                                                 request_id=request_id)
+
+        full_response = ""
+        async for request_output in results_generator:
+            generated_text = request_output.outputs[0].text
+            new_text = generated_text[len(full_response):]
+            full_response = generated_text
+
+            is_finished = request_output.finished
+
+            if new_text or is_finished:
+                msg = {'status': 'FINISHED' if is_finished else 'GENERATING', 'text': new_text, 'id': request_id}
+
+                if 'tts' in self.streams:
+                    self.streams['tts'].send(msg)
+
+                    # In case of a StreamReset, it is raised here and generation is interrupted. No need to use a cancellation
+                    # Event.
+                    # If TTS is used, the chat server should never send 'FINISHED' and only the TTS server should.
+                    self.streams['client'].send(msg | {'status': 'GENERATING'})
+
+                    [self.streams['client'].send(m) for m in self.streams['tts'].recv()]
+                else:
+                    self.streams['client'].send(msg)
 
         self.history = history  # Only add to permanent history if generation was not interrupted.
-        self.history.append({'role': 'assistant', 'content': result})
+        self.history.append({'role': 'assistant', 'content': full_response})
 
-        waiting_for_tts = 'tts' in self.streams
-        while waiting_for_tts:
-            messages = self.streams['tts'].recv()
-            for msg in messages:
-                self.streams['client'].send(msg)
-                waiting_for_tts = msg['status'] != 'FINISHED'
-            await asyncio.sleep(POLL_INTERVAL)
+        if 'tts' in self.streams:
+            waiting_for_tts = True
+            while waiting_for_tts:
+                messages = self.streams['tts'].recv()
+                for msg in messages:
+                    self.streams['client'].send(msg)
+                    if msg.get('status') == 'FINISHED':
+                        waiting_for_tts = False
+                if waiting_for_tts:
+                    await asyncio.sleep(POLL_INTERVAL)
 
 
 if __name__ == '__main__':

@@ -1,2 +1,1 @@
-accelerate==1.4.0
-bitsandbytes==0.45.3
+vllm==0.10.0

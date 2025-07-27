@@ -1,2 +1,2 @@
 PyAudio==0.2.14
-torchaudio==2.6.0
+torchaudio==2.7.1
