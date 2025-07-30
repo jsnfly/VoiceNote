@@ -11,7 +11,7 @@ from server.utils.streaming_connection import POLL_INTERVAL, StreamReset
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 MODEL_DIR = Path('./models/tts-1.6b-en_fr')
-VOICE_PATH = Path('./models/tts-voices/expresso/ex03-ex01_happy_001_channel1_334s.wav.1e68beda@240.safetensors')
+VOICE_PATH = Path('./models/tts-voices/expresso/ex01-ex02_fast_001_channel2_73s.wav.1e68beda@240.safetensors')
 
 
 class AsyncTTSGenerator:

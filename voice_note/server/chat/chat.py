@@ -9,10 +9,10 @@ from server.base_server import BaseServer
 from server.utils.streaming_connection import POLL_INTERVAL
 from server.utils.message import Message
 
-CHAT_MODEL = './models/chat/Mistral-Nemo-Instruct-FP8-2407'
-SYSTEM_PROMPT = """Your name is George. Your are an intelligent, witty and pragmatic assistant. You are part of a
-speech-to-speech pipeline, i.e. you can talk to the user directly. This means you should keep your answers concise,
-like in a real conversation."""
+CHAT_MODEL = './models/chat/Qwen3-8B-FP8'
+SYSTEM_PROMPT = """You are a helpful, smart and funny assistant talking directly to the user by leveraging
+speech-to-text and text-to-speech. So keep your responses concise like in a real conversation and do not use any
+spechial characters or emojis as they can not be expressed by the text-to-speech component.""".replace("\n", " ")
 TTS_URI = 'ws://tts:12347'
 
 
@@ -25,8 +25,7 @@ class ChatServer(BaseServer):
             self.history.append({'role': 'system', 'content': SYSTEM_PROMPT})
 
         engine_args = AsyncEngineArgs(model=CHAT_MODEL, tensor_parallel_size=1, gpu_memory_utilization=0.66,
-                                      load_format='mistral', tokenizer_mode='mistral', config_format='mistral',
-                                      max_model_len=12384, max_num_seqs=2)
+                                      max_model_len=16384, max_num_seqs=1)
         self.engine = AsyncLLMEngine.from_engine_args(engine_args)
         self.tokenizer = None  # Initialized in `#serve_forever`
 
@@ -52,14 +51,12 @@ class ChatServer(BaseServer):
 
     async def _run_workload(self, received: List[Message.DataDict]) -> None:
         history = self.history + [{'role': 'user', 'content': received[0]['text']}]
-        prompt_token_ids = self.tokenizer.apply_chat_template(history, add_generation_prompt=True, tokenize=False)
-        print("PROMPT TOKEN IDS")
-        print(prompt_token_ids)
-
+        prompt_token_ids = self.tokenizer.apply_chat_template(history, add_generation_prompt=True,
+                                                              enable_thinking=False)
         request_id = received[0]['id']
         sampling_params = SamplingParams(max_tokens=8192)
-        results_generator = self.engine.generate(prompt=TokensPrompt(prompt_token_ids=prompt_token_ids), sampling_params=sampling_params,
-                                                 request_id=request_id)
+        results_generator = self.engine.generate(prompt=TokensPrompt(prompt_token_ids=prompt_token_ids),
+                                                 sampling_params=sampling_params, request_id=request_id)
 
         full_response = ""
         async for request_output in results_generator:

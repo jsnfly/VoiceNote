@@ -30,7 +30,7 @@ services:
       dockerfile: chat/Dockerfile
     container_name: voice_note_chat
     volumes:
-      - ../models/chat/gemma-3-4b-it:/usr/src/app/models/chat/gemma-3-4b-it:ro
+      - ../models/chat/Qwen3-8B-FP8:/usr/src/app/models/chat/Qwen3-8B-FP8:ro
       - ../logs:/usr/src/app/logs
     expose:
       - 12346
