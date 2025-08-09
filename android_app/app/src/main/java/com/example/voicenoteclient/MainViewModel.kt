@@ -16,7 +16,6 @@ data class UiState(
     val isRecording: Boolean = false,
     val isActionButtonsEnabled: Boolean = false,
     val savePath: String? = null,
-    val isChatMode: Boolean = true,
     val topic: String = "misc"
 )
 
@@ -50,7 +49,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun onRecordButtonPress() {
         _uiState.update { it.copy(isRecording = true, transcriptionText = "") }
         repository.stopPlayback()
-        repository.startRecording(_uiState.value.isChatMode, _uiState.value.topic)
+        repository.startRecording(_uiState.value.topic)
         recordingJob = viewModelScope.launch(Dispatchers.IO) { // Run on IO dispatcher
             while (_uiState.value.isRecording) {
                 repository.writeAudioDataToSocket()
@@ -69,17 +68,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         repository.sendAction("DELETE", _uiState.value.savePath)
     }
 
-    fun onWrongButtonPress() {
-        repository.sendAction("WRONG", _uiState.value.savePath)
-    }
-
     fun onNewChatButtonPress() {
         _uiState.update { it.copy(transcriptionText = "", isActionButtonsEnabled = false) }
-        repository.sendAction("NEW CHAT", _uiState.value.savePath)
-    }
-
-    fun onChatModeChange(isChatMode: Boolean) {
-        _uiState.update { it.copy(isChatMode = isChatMode) }
+        repository.sendAction("NEW CONVERSATION", _uiState.value.savePath)
     }
 
     fun onTopicChange(topic: String) {

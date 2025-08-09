@@ -9,7 +9,6 @@ import android.text.method.ScrollingMovementMethod
 import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
-import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -65,10 +64,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var recordButton: Button
     private lateinit var deleteButton: Button
     private lateinit var newChatButton: Button
-    private lateinit var wrongButton: Button
     private lateinit var settingsButton: Button
     private lateinit var transcriptionView: TextView
-    private lateinit var chatModeCheckBox: CheckBox
     private lateinit var topicEditText: EditText
 
     private val viewModel: MainViewModel by viewModels {
@@ -98,11 +95,7 @@ class MainActivity : AppCompatActivity() {
             viewModel.uiState.collect { state ->
                 transcriptionView.text = state.transcriptionText
                 deleteButton.isEnabled = state.isActionButtonsEnabled
-                wrongButton.isEnabled = state.isActionButtonsEnabled
                 recordButton.alpha = if (state.isRecording) 0.25f else 1.0f
-                if (chatModeCheckBox.isChecked != state.isChatMode) {
-                    chatModeCheckBox.isChecked = state.isChatMode
-                }
                 if (topicEditText.text.toString() != state.topic) {
                     topicEditText.setText(state.topic)
                 }
@@ -137,10 +130,9 @@ class MainActivity : AppCompatActivity() {
         recordButton = findViewById(R.id.recordButton)
         deleteButton = findViewById(R.id.deleteButton)
         newChatButton = findViewById(R.id.newChatButton)
-        wrongButton = findViewById(R.id.wrongButton)
+        newChatButton.text = "New Conversation"
         settingsButton = findViewById(R.id.settingsButton)
         transcriptionView = findViewById(R.id.transcription)
-        chatModeCheckBox = findViewById(R.id.checkBoxChatMode)
         topicEditText = findViewById(R.id.editTextTopic)
 
         transcriptionView.movementMethod = ScrollingMovementMethod()
@@ -155,12 +147,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         deleteButton.setOnClickListener { viewModel.onDeleteButtonPress() }
-        wrongButton.setOnClickListener { viewModel.onWrongButtonPress() }
         newChatButton.setOnClickListener { viewModel.onNewChatButtonPress() }
-
-        chatModeCheckBox.setOnCheckedChangeListener { _, isChecked ->
-            viewModel.onChatModeChange(isChecked)
-        }
 
         topicEditText.addTextChangedListener { text ->
             viewModel.onTopicChange(text.toString())

@@ -1,12 +1,13 @@
 import asyncio
-import json
 import torch
 from pathlib import Path
 from typing import Dict, List, Tuple, Union
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
 from server.base_server import BaseServer, ThreadExecutor
+from websockets.server import WebSocketServerProtocol
 from server.utils.audio import AudioConfig
+from server.utils.conversation import Conversation
 from server.utils.message import Message
 from server.utils.misc import BASE_DIR
 from server.utils.sample import Sample
@@ -30,21 +31,26 @@ class Transcription(ThreadExecutor):
         )
         self.model.to(DEVICE)
 
-    def blocking_fn(self, bytes_: bytes, audio_config: Dict, topic: str) -> Tuple[str, Path]:
-        sample = Sample([bytes_], AudioConfig(**audio_config))
+    def blocking_fn(self, sample: Sample) -> str:
         sample.transcribe(self.model, self.processor, LANG)
-        save_path = sample.save(SAVE_DIR / topic)
-        print(sample.result)
-        return sample.result, save_path
+        return sample.result
 
 
 class STTServer(BaseServer):
     def __init__(self, host: str, port: int, chat_uri: Union[str, None] = None):
         super().__init__("stt", host, port)
         self.transcription = Transcription()
+        self.conversation: Conversation = None
 
         if chat_uri is not None:
             self.connections = {'chat': chat_uri}
+
+    def _new_conversation(self, topic: str = 'misc') -> None:
+        self.conversation = Conversation(topic=topic)
+
+    async def handle_connection(self, client_connection: WebSocketServerProtocol) -> None:
+        self._new_conversation()
+        await super().handle_connection(client_connection)
 
     def _recv_client_messages(self) -> List[Message.DataDict]:
         audio_messages = []
@@ -52,9 +58,8 @@ class STTServer(BaseServer):
             action = msg.get('action')
             if action == 'DELETE':
                 self.delete_entry(msg['save_path'])
-            elif action == 'WRONG':
-                self.add_to_metadata(msg['save_path'], {'transcription_error': True})
-            elif action == 'NEW CHAT':
+            elif action == 'NEW CONVERSATION':
+                self._new_conversation()
                 if 'chat' in self.streams:
                     self.streams['chat'].reset(msg['id'])
                 self.streams['chat'].send(msg)
@@ -68,15 +73,24 @@ class STTServer(BaseServer):
     async def _run_workload(self, messages: List[Message.DataDict]) -> None:
         assert messages[0]['status'] == 'INITIALIZING'
 
-        bytes_ = b''.join([msg.get('audio', b'') for msg in messages])
-        transcription, save_path = await self.transcription.run(bytes_, messages[0]['audio_config'],
-                                                                messages[0]['topic'])
+        audio_config = AudioConfig(**messages[0]['audio_config'])
+        audio_bytes = b''.join([msg.get('audio', b'') for msg in messages])
+        sample = Sample(fragments=[audio_bytes], audio_config=audio_config)
 
-        result = {'status': 'FINISHED', 'text': transcription, 'save_path': str(save_path), 'id': messages[0]['id']}
-        if 'chat' in self.streams and messages[0]['chat_mode']:
-            await self.get_chat_response(result)
-        else:
-            self.streams['client'].send(result)
+        transcription = await self.transcription.run(sample)
+
+        assistant_text, assistant_audio, assistant_audio_config = await self.get_chat_response(
+            {'text': transcription, 'id': messages[0]['id']}
+        )
+
+        self.conversation.add_turn(
+            user_text=transcription,
+            user_audio_bytes=sample.get_audio_bytes(),
+            user_audio_config=audio_config,
+            assistant_text=assistant_text,
+            assistant_audio_bytes=assistant_audio,
+            assistant_audio_config=AudioConfig(**assistant_audio_config)
+        )
 
     @staticmethod
     def delete_entry(save_path: str) -> None:
@@ -89,30 +103,26 @@ class STTServer(BaseServer):
         save_path.rmdir()
         print(f"Deleted {save_path}.")
 
-    @staticmethod
-    def add_to_metadata(save_path: str, data: Dict) -> None:
-        save_path = Path(save_path)
-        if not save_path.exists():
-            return
-
-        metadata_path = save_path / 'metadata.json'
-        if metadata_path.exists():
-            with metadata_path.open() as f:
-                metadata = json.load(f)
-        else:
-            metadata = {}
-
-        metadata = metadata | data
-        with metadata_path.open('w') as f:
-            json.dump(metadata, f, sort_keys=True, indent=4, ensure_ascii=False)
-
-    async def get_chat_response(self, transcription_result: Message.DataDict) -> None:
+    async def get_chat_response(self, transcription_result: Message.DataDict) -> Tuple[str, bytes, Dict]:
         self.streams['chat'].send(transcription_result)
+
+        assistant_text = ""
+        assistant_audio_bytes = b""
+        assistant_audio_config = None
+
         while True:
             for msg in self.streams['chat'].recv():
-                self.streams['client'].send(msg | {'save_path': transcription_result['save_path']})
-                if msg["status"] == "FINISHED":
-                    return
+                self.streams['client'].send(msg | {'save_path': self.conversation.get_save_path()})
+
+                if 'text' in msg:
+                    assistant_text += msg['text']
+                if 'audio' in msg:
+                    assistant_audio_bytes += msg['audio']
+                if 'config' in msg:
+                    assistant_audio_config = msg['config']
+
+                if msg.get("status") == "FINISHED":
+                    return assistant_text, assistant_audio_bytes, assistant_audio_config
             await asyncio.sleep(POLL_INTERVAL)
 
 

@@ -56,14 +56,13 @@ class VoiceNoteRepository(
         }
     }
 
-    fun startRecording(isChatMode: Boolean, topic: String) {
+    fun startRecording(topic: String) {
         externalScope.launch {
             val id = UUID.randomUUID().toString()
             communicationId = id
             webSocketManager.connection.reset(id)
             webSocketManager.connection.send(mapOf(
                 "audio_config" to audioConfig,
-                "chat_mode" to isChatMode,
                 "id" to id,
                 "status" to "INITIALIZING",
                 "topic" to topic

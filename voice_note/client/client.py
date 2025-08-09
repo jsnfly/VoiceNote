@@ -17,7 +17,6 @@ async def start_recording(connection, input_device_index, values):
     connection.reset(id_)
     connection.send({
         'audio_config': get_audio_config(input_device_index),
-        'chat_mode': values['chat_mode'],
         'id': id_,
         'status': 'INITIALIZING',
         'topic': values['topic']
@@ -127,7 +126,6 @@ async def ui(window, com_stream):
             break
 
         await asyncio.sleep(POLL_INTERVAL)
-        window['New Chat'].update(disabled=not values['chat_mode'])
 
         if event == 'REC' and window['status'].get() == 'STOPPED':
             playback_stream = stop_playback(playback_stream)
@@ -144,7 +142,6 @@ async def ui(window, com_stream):
                 window['message'].update(window['message'].get() + ''.join([msg['text'] for msg in text_messages]))
                 save_path = text_messages[0]['save_path']
                 window['Delete'].update(disabled=False)
-                window['Wrong'].update(disabled=False)
                 text_messages = []
 
             # .is_stopped returns False even if .is_active is False.
@@ -153,10 +150,9 @@ async def ui(window, com_stream):
                 playback_stream = start_playback(audio_messages[0]['config'],
                                                  b''.join([msg['audio'] for msg in audio_messages]))
                 audio_messages = []
-        elif event in ['Delete', 'Wrong', 'New Chat']:
+        elif event in ['Delete', 'New Conversation']:
             if event != 'Wrong':
                 window['Delete'].update(disabled=True)
-                window['Wrong'].update(disabled=True)
                 window['message'].update('')
             id_ = str(uuid4())
             com_stream.reset(id_)
@@ -170,11 +166,9 @@ if __name__ == '__main__':
         [sg.Text(text='', size=(40, 20), key='message', background_color='#262624')],
         [
             sg.Button(button_text='Delete', disabled=True),
-            sg.Button(button_text='Wrong', disabled=True),
-            sg.Button(button_text='New Chat', disabled=True)
+            sg.Button(button_text='New Conversation', disabled=False)
         ],
-        [sg.Text(text='Topic:'), sg.Input(default_text='misc', size=(16, 1), key='topic')],
-        [sg.Checkbox('Chat Mode', key='chat_mode')]
+        [sg.Text(text='Topic:'), sg.Input(default_text='misc', size=(16, 1), key='topic')]
     ]
     window = sg.Window('Voice Note Client', elements, size=(400, 750), element_justification='c', finalize=True)
 

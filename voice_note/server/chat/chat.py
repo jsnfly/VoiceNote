@@ -40,7 +40,7 @@ class ChatServer(BaseServer):
     def _recv_client_messages(self) -> List[Message.DataDict]:
         text_messages = []
         for msg in super()._recv_client_messages():
-            if msg.get('action') == 'NEW CHAT':
+            if msg.get('action') == 'NEW CONVERSATION':
                 self.history = self.history[:1] if SYSTEM_PROMPT else []
             else:
                 text_messages.append(msg)
