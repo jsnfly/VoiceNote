@@ -219,9 +219,10 @@ class TTSServer(BaseServer):
         await self.generator.start()
 
         current_id = None
+        received = []
         while True:
             try:
-                received = self._recv_client_messages()
+                received += self._recv_client_messages()
 
                 # Discard data for a previous id. Necessary, because the StreamReset (and with that the clearing of
                 # `received`) happens only after it was attempted to send a response.
@@ -230,10 +231,16 @@ class TTSServer(BaseServer):
 
                 if len(received) > 0:
                     current_id = received[0]['id']
-                    await self.generator.add_text(''.join(msg['text'] for msg in received))
-                    if received[-1]['status'] == 'FINISHED':
+                    text = ''.join(msg['text'] for msg in received)
+                    finished = received[-1]['status'] == 'FINISHED'
+                    print(text, finished)
+
+                    if len(text.split()) >= 2 or finished:
+                        # Only add whole words or the end of the text.
+                        await self.generator.add_text(text)
+                        received = []
+                    if finished:
                         await self.generator.finish()
-                    received = []
 
                 if current_id is not None and not self.generator.audio_queue.empty():
                     audio = await self.generator.get_audio_chunk()
