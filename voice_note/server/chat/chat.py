@@ -50,7 +50,10 @@ class ChatServer(BaseServer):
         return int(len(received) > 0)
 
     async def _run_workload(self, received: List[Message.DataDict]) -> None:
-        history = self.history + [{'role': 'user', 'content': received[0]['text']}]
+        user_prompt = {'role': 'user', 'content': received[0]['text']}
+        history = self.history + [user_prompt]
+        self.history = history + [{'role': 'assistant', 'content': ''}]
+
         prompt_token_ids = self.tokenizer.apply_chat_template(history, add_generation_prompt=True,
                                                               enable_thinking=False)
         request_id = received[0]['id']
@@ -59,41 +62,38 @@ class ChatServer(BaseServer):
                                                  sampling_params=sampling_params, request_id=request_id)
 
         full_response = ""
-        async for request_output in results_generator:
-            generated_text = request_output.outputs[0].text
-            new_text = generated_text[len(full_response):]
-            full_response = generated_text
+        try:
+            async for request_output in results_generator:
+                generated_text = request_output.outputs[0].text
+                new_text = generated_text[len(full_response):]
+                full_response = generated_text
+                self.history[-1]['content'] = full_response
 
-            is_finished = request_output.finished
+                is_finished = request_output.finished
 
-            if new_text or is_finished:
-                msg = {'status': 'FINISHED' if is_finished else 'GENERATING', 'text': new_text, 'id': request_id}
+                if new_text or is_finished:
+                    msg = {'status': 'FINISHED' if is_finished else 'GENERATING', 'text': new_text, 'id': request_id}
 
-                if 'tts' in self.streams:
-                    self.streams['tts'].send(msg)
+                    if 'tts' in self.streams:
+                        self.streams['tts'].send(msg)
+                        self.streams['client'].send(msg | {'status': 'GENERATING'})
+                        [self.streams['client'].send(m) for m in self.streams['tts'].recv()]
+                    else:
+                        self.streams['client'].send(msg)
 
-                    # In case of a StreamReset, it is raised here and generation is interrupted. No need to use a cancellation
-                    # Event.
-                    # If TTS is used, the chat server should never send 'FINISHED' and only the TTS server should.
-                    self.streams['client'].send(msg | {'status': 'GENERATING'})
-
-                    [self.streams['client'].send(m) for m in self.streams['tts'].recv()]
-                else:
-                    self.streams['client'].send(msg)
-
-        self.history = history  # Only add to permanent history if generation was not interrupted.
-        self.history.append({'role': 'assistant', 'content': full_response})
-
-        if 'tts' in self.streams:
-            waiting_for_tts = True
-            while waiting_for_tts:
-                messages = self.streams['tts'].recv()
-                for msg in messages:
-                    self.streams['client'].send(msg)
-                    if msg.get('status') == 'FINISHED':
-                        waiting_for_tts = False
-                if waiting_for_tts:
-                    await asyncio.sleep(POLL_INTERVAL)
+            if 'tts' in self.streams:
+                waiting_for_tts = True
+                while waiting_for_tts:
+                    messages = self.streams['tts'].recv()
+                    for msg in messages:
+                        self.streams['client'].send(msg)
+                        if msg.get('status') == 'FINISHED':
+                            waiting_for_tts = False
+                    if waiting_for_tts:
+                        await asyncio.sleep(POLL_INTERVAL)
+        except asyncio.CancelledError:
+            await self.engine.abort(request_id)
+            raise
 
 
 if __name__ == '__main__':

@@ -79,17 +79,14 @@ class STTServer(BaseServer):
 
         transcription = await self.transcription.run(sample)
 
-        assistant_text, assistant_audio, assistant_audio_config = await self.get_chat_response(
-            {'text': transcription, 'id': messages[0]['id']}
-        )
-
         self.conversation.add_turn(
             user_text=transcription,
             user_audio_bytes=sample.get_audio_bytes(),
             user_audio_config=audio_config,
-            assistant_text=assistant_text,
-            assistant_audio_bytes=assistant_audio,
-            assistant_audio_config=AudioConfig(**assistant_audio_config)
+        )
+
+        await self.get_chat_response(
+            {'text': transcription, 'id': messages[0]['id']}
         )
 
     @staticmethod
@@ -103,27 +100,28 @@ class STTServer(BaseServer):
         save_path.rmdir()
         print(f"Deleted {save_path}.")
 
-    async def get_chat_response(self, transcription_result: Message.DataDict) -> Tuple[str, bytes, Dict]:
+    async def get_chat_response(self, transcription_result: Message.DataDict) -> None:
         self.streams['chat'].send(transcription_result)
 
-        assistant_text = ""
-        assistant_audio_bytes = b""
         assistant_audio_config = None
+        try:
+            while True:
+                for msg in self.streams['chat'].recv():
+                    self.streams['client'].send(msg | {'save_path': self.conversation.get_save_path()})
 
-        while True:
-            for msg in self.streams['chat'].recv():
-                self.streams['client'].send(msg | {'save_path': self.conversation.get_save_path()})
+                    if 'config' in msg and not assistant_audio_config:
+                        assistant_audio_config = AudioConfig(**msg['config'])
 
-                if 'text' in msg:
-                    assistant_text += msg['text']
-                if 'audio' in msg:
-                    assistant_audio_bytes += msg['audio']
-                if 'config' in msg:
-                    assistant_audio_config = msg['config']
+                    self.conversation.update_assistant_response(
+                        text_chunk=msg.get('text', ''),
+                        audio_chunk=msg.get('audio', b''),
+                    )
 
-                if msg.get("status") == "FINISHED":
-                    return assistant_text, assistant_audio_bytes, assistant_audio_config
-            await asyncio.sleep(POLL_INTERVAL)
+                    if msg.get("status") == "FINISHED":
+                        return
+                await asyncio.sleep(POLL_INTERVAL)
+        finally:
+            self.conversation.finalize_assistant_audio(assistant_audio_config)
 
 
 if __name__ == '__main__':
