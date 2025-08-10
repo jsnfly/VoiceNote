@@ -15,8 +15,7 @@ data class UiState(
     val transcriptionText: String = "",
     val isRecording: Boolean = false,
     val isActionButtonsEnabled: Boolean = false,
-    val savePath: String? = null,
-    val topic: String = "misc"
+    val savePath: String? = null
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -49,7 +48,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun onRecordButtonPress() {
         _uiState.update { it.copy(isRecording = true, transcriptionText = "") }
         repository.stopPlayback()
-        repository.startRecording(_uiState.value.topic)
+        repository.startRecording()
         recordingJob = viewModelScope.launch(Dispatchers.IO) { // Run on IO dispatcher
             while (_uiState.value.isRecording) {
                 repository.writeAudioDataToSocket()
@@ -71,10 +70,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun onNewChatButtonPress() {
         _uiState.update { it.copy(transcriptionText = "", isActionButtonsEnabled = false) }
         repository.sendAction("NEW CONVERSATION", _uiState.value.savePath)
-    }
-
-    fun onTopicChange(topic: String) {
-        _uiState.update { it.copy(topic = topic) }
     }
 
     fun setupAudioRecord(activity: MainActivity) {

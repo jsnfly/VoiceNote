@@ -56,7 +56,7 @@ class VoiceNoteRepository(
         }
     }
 
-    fun startRecording(topic: String) {
+    fun startRecording() {
         externalScope.launch {
             val id = UUID.randomUUID().toString()
             communicationId = id
@@ -64,8 +64,7 @@ class VoiceNoteRepository(
             webSocketManager.connection.send(mapOf(
                 "audio_config" to audioConfig,
                 "id" to id,
-                "status" to "INITIALIZING",
-                "topic" to topic
+                "status" to "INITIALIZING"
             ))
             audioRecord.startRecording()
         }

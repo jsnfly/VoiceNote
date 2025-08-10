@@ -45,8 +45,8 @@ class STTServer(BaseServer):
         if chat_uri is not None:
             self.connections = {'chat': chat_uri}
 
-    def _new_conversation(self, topic: str = 'misc') -> None:
-        self.conversation = Conversation(topic=topic)
+    def _new_conversation(self) -> None:
+        self.conversation = Conversation()
 
     async def handle_connection(self, client_connection: WebSocketServerProtocol) -> None:
         self._new_conversation()

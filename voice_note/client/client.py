@@ -18,8 +18,7 @@ async def start_recording(connection, input_device_index, values):
     connection.send({
         'audio_config': get_audio_config(input_device_index),
         'id': id_,
-        'status': 'INITIALIZING',
-        'topic': values['topic']
+        'status': 'INITIALIZING'
     })
 
     def _callback(in_data, *args):
@@ -167,8 +166,7 @@ if __name__ == '__main__':
         [
             sg.Button(button_text='Delete', disabled=True),
             sg.Button(button_text='New Conversation', disabled=False)
-        ],
-        [sg.Text(text='Topic:'), sg.Input(default_text='misc', size=(16, 1), key='topic')]
+        ]
     ]
     window = sg.Window('Voice Note Client', elements, size=(400, 750), element_justification='c', finalize=True)
 

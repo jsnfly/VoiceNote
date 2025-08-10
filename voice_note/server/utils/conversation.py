@@ -16,11 +16,10 @@ def _float_to_int16(audio_bytes: bytes) -> bytes:
 
 
 class Conversation:
-    def __init__(self, topic: str):
-        self.topic = topic
+    def __init__(self):
         self.turns: List[Dict] = []
         self.assistant_audio_buffer = b""
-        self.save_dir = Path('outputs') / self.topic
+        self.save_dir = Path('outputs')
         self.save_path = self.save_dir / time.strftime("%Y%m%d-%H%M%S")
         self.save_path.mkdir(parents=True, exist_ok=True)
 
@@ -88,7 +87,6 @@ class Conversation:
         filepath = self.save_path / "conversation.json"
         with open(filepath, 'w') as f:
             json.dump({
-                "topic": self.topic,
                 "turns": self.turns
             }, f, indent=4)
 

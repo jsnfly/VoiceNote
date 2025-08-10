@@ -66,7 +66,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var newChatButton: Button
     private lateinit var settingsButton: Button
     private lateinit var transcriptionView: TextView
-    private lateinit var topicEditText: EditText
 
     private val viewModel: MainViewModel by viewModels {
         MainViewModelFactory(application)
@@ -96,9 +95,6 @@ class MainActivity : AppCompatActivity() {
                 transcriptionView.text = state.transcriptionText
                 deleteButton.isEnabled = state.isActionButtonsEnabled
                 recordButton.alpha = if (state.isRecording) 0.25f else 1.0f
-                if (topicEditText.text.toString() != state.topic) {
-                    topicEditText.setText(state.topic)
-                }
             }
         }
     }
@@ -133,7 +129,6 @@ class MainActivity : AppCompatActivity() {
         newChatButton.text = "New Conversation"
         settingsButton = findViewById(R.id.settingsButton)
         transcriptionView = findViewById(R.id.transcription)
-        topicEditText = findViewById(R.id.editTextTopic)
 
         transcriptionView.movementMethod = ScrollingMovementMethod()
 
@@ -148,10 +143,6 @@ class MainActivity : AppCompatActivity() {
 
         deleteButton.setOnClickListener { viewModel.onDeleteButtonPress() }
         newChatButton.setOnClickListener { viewModel.onNewChatButtonPress() }
-
-        topicEditText.addTextChangedListener { text ->
-            viewModel.onTopicChange(text.toString())
-        }
 
         val settingsLayout: LinearLayout = findViewById(R.id.settingsLayout)
         val saveButton: Button = findViewById(R.id.saveSettingsButton)
