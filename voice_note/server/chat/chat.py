@@ -1,5 +1,4 @@
 import asyncio
-import json
 from typing import List, Union
 from vllm.engine.async_llm_engine import AsyncLLMEngine
 from vllm.engine.arg_utils import AsyncEngineArgs
@@ -7,19 +6,11 @@ from vllm.sampling_params import SamplingParams
 from vllm import TokensPrompt
 
 from server.base_server import BaseServer
+from server.chat.tools import ToolManager
 from server.utils.streaming_connection import POLL_INTERVAL
 from server.utils.message import Message
 
 CHAT_MODEL = './models/chat/Qwen3-8B-FP8'
-TOOL_PROMPT = """You have access to the following tools. To use a tool, you must respond *only* with a JSON object
-inside a <tool_call> block. The JSON should have "name" and "parameters" keys.
-Example: <tool_call>{"name": "enable_thinking", "parameters": {"enable": true}}</tool_call>
-Available tools: - Tool `enable_thinking`: Enables or disables the "thinking mode" for generating responses.
-Parameters: `{"enable": <boolean>}`""".replace("\n", " ")
-SYSTEM_PROMPT = f"""You are a helpful, smart and funny assistant talking directly to the user by leveraging
-speech-to-text and text-to-speech. So keep your responses concise like in a real conversation and do not use any
-spechial characters (including dashes, asteriks and so on) or emojis as they can not be expressed by the
-text-to-speech component. {TOOL_PROMPT}""".replace("\n", " ")
 TTS_URI = 'ws://tts:12347'
 
 
@@ -27,14 +18,12 @@ class ChatServer(BaseServer):
 
     def __init__(self, host: str, port: int, tts_uri: Union[str, None] = None):
         super().__init__("chat", host, port)
+        self.tool_manager = ToolManager()
+        self.system_prompt = self.tool_manager.get_default_system_prompt()
         self.history = []
-        if SYSTEM_PROMPT:
-            self.history.append({'role': 'system', 'content': SYSTEM_PROMPT})
+        self.reset_conversation()
 
         self.thinking_enabled = False
-        self.tools = {
-            "enable_thinking": self._tool_enable_thinking
-        }
 
         engine_args = AsyncEngineArgs(model=CHAT_MODEL, tensor_parallel_size=1, gpu_memory_utilization=0.66,
                                       max_model_len=16384, max_num_seqs=1)
@@ -49,32 +38,19 @@ class ChatServer(BaseServer):
         self.tokenizer = await self.engine.get_tokenizer()
         await super().serve_forever()
 
-    def _tool_enable_thinking(self, enable: bool) -> str:
-        self.thinking_enabled = bool(enable)
-        mode = "enabled" if self.thinking_enabled else "disabled"
-        return f"Okay, I have {mode} thinking mode."
+    def reset_conversation(self) -> None:
+        self.history = [{'role': 'system', 'content': self.system_prompt}] if self.system_prompt else []
 
-    def _execute_tool_call(self, tool_call_str: str) -> str:
-        try:
-            tool_call = json.loads(tool_call_str)
-            tool_name = tool_call.get("name")
-            tool_params = tool_call.get("parameters", {})
-
-            if tool_name in self.tools:
-                tool_func = self.tools[tool_name]
-                return tool_func(**tool_params)
-            else:
-                return f"Sorry, I don't know the tool '{tool_name}'."
-        except json.JSONDecodeError:
-            return "Sorry, I received an invalid tool call format."
-        except Exception as e:
-            return f"An error occurred while executing the tool: {e}"
+    def _execute_tool_call(self, tool_call_str: str) -> tuple[dict, str]:
+        """Executes a tool call and returns the state updates and a confirmation message."""
+        return self.tool_manager.execute_tool_call(tool_call_str)
 
     def _recv_client_messages(self) -> List[Message.DataDict]:
         text_messages = []
         for msg in super()._recv_client_messages():
             if msg.get('action') == 'NEW CONVERSATION':
-                self.history = self.history[:1] if SYSTEM_PROMPT else []
+                self.system_prompt = self.tool_manager.get_default_system_prompt()
+                self.reset_conversation()
             else:
                 text_messages.append(msg)
         return text_messages
@@ -117,17 +93,28 @@ class ChatServer(BaseServer):
                     if TOOL_END_TOKEN in new_text:
                         await self.engine.abort(request_id)
                         tool_content_str = full_response.split(TOOL_START_TOKEN)[1].split(TOOL_END_TOKEN)[0]
-                        confirmation_msg = self._execute_tool_call(tool_content_str)
 
-                        self.history[-1]['content'] = full_response # Save the raw tool call
+                        # 1. Get updates and message, but DON'T apply them yet.
+                        updates, confirmation_msg = self._execute_tool_call(tool_content_str)
+
+                        # 2. Finalize the history for the CURRENT turn.
+                        self.history[-1]['content'] = full_response  # Save the raw tool call
                         self.history.append({'role': 'tool', 'content': confirmation_msg})
 
-                        # Send confirmation text to client and TTS
+                        # 3. Send the confirmation message to the user.
                         self.streams['client'].send({'status': 'GENERATING', 'text': confirmation_msg, 'id': request_id})
                         if 'tts' in self.streams:
                             self.streams['tts'].send({'status': 'FINISHED', 'text': confirmation_msg, 'id': request_id})
                         else: # If no TTS, we must send the FINISHED signal ourselves
                             self.streams['client'].send({'status': 'FINISHED', 'text': '', 'id': request_id})
+
+                        # 4. NOW, apply the state updates for the NEXT turn.
+                        if "thinking_enabled" in updates:
+                            self.thinking_enabled = updates["thinking_enabled"]
+                        if "system_prompt" in updates:
+                            self.system_prompt = updates["system_prompt"]
+                        if updates.get("reset_conversation"):
+                            self.reset_conversation()
 
                         # Break the loop, the rest of the logic will handle audio forwarding
                         break
@@ -212,6 +199,19 @@ class ChatServer(BaseServer):
         except asyncio.CancelledError:
             await self.engine.abort(request_id)
             raise
+
+    def _recv_client_messages(self) -> List[Message.DataDict]:
+        text_messages = []
+        for msg in super()._recv_client_messages():
+            if msg.get('action') == 'NEW CONVERSATION':
+                self.system_prompt = self.tool_manager.get_default_system_prompt()
+                self.reset_conversation()
+            else:
+                text_messages.append(msg)
+        return text_messages
+
+    def _get_cutoff_idx(self, received: List[Message.DataDict]) -> int:
+        return int(len(received) > 0)
 
 
 if __name__ == '__main__':
