@@ -11,10 +11,15 @@ from server.utils.streaming_connection import POLL_INTERVAL
 from server.utils.message import Message
 
 CHAT_MODEL = './models/chat/Qwen3-8B-FP8'
-TOOL_PROMPT = """You have access to the following tools. To use a tool, you must respond *only* with a JSON object inside a <tool_call> block. The JSON should have "name" and "parameters" keys. Example: <tool_call>{"name": "enable_thinking", "parameters": {"enable": true}}</tool_call> Available tools: - Tool `enable_thinking`: Enables or disables the "thinking mode" for generating responses. Parameters: `{"enable": <boolean>}`"""
+TOOL_PROMPT = """You have access to the following tools. To use a tool, you must respond *only* with a JSON object
+inside a <tool_call> block. The JSON should have "name" and "parameters" keys.
+Example: <tool_call>{"name": "enable_thinking", "parameters": {"enable": true}}</tool_call>
+Available tools: - Tool `enable_thinking`: Enables or disables the "thinking mode" for generating responses.
+Parameters: `{"enable": <boolean>}`""".replace("\n", " ")
 SYSTEM_PROMPT = f"""You are a helpful, smart and funny assistant talking directly to the user by leveraging
 speech-to-text and text-to-speech. So keep your responses concise like in a real conversation and do not use any
-spechial characters or emojis as they can not be expressed by the text-to-speech component. {TOOL_PROMPT}""".replace("\n", " ")
+spechial characters (including dashes, asteriks and so on) or emojis as they can not be expressed by the
+text-to-speech component. {TOOL_PROMPT}""".replace("\n", " ")
 TTS_URI = 'ws://tts:12347'
 
 

@@ -56,8 +56,14 @@ class STTServer(BaseServer):
         audio_messages = []
         for msg in super()._recv_client_messages():
             action = msg.get('action')
-            if action == 'DELETE':
+            if action == 'DELETE CONVERSATION':
                 self.delete_entry(msg['save_path'])
+                self._new_conversation()
+                if 'chat' in self.streams:
+                    self.streams['chat'].reset(msg['id'])
+                    msg_for_chat = msg.copy()
+                    msg_for_chat['action'] = 'NEW CONVERSATION'
+                    self.streams['chat'].send(msg_for_chat)
             elif action == 'NEW CONVERSATION':
                 self._new_conversation()
                 if 'chat' in self.streams:

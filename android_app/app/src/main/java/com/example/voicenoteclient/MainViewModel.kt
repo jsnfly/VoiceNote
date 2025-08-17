@@ -64,7 +64,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onDeleteButtonPress() {
         _uiState.update { it.copy(transcriptionText = "", isActionButtonsEnabled = false) }
-        repository.sendAction("DELETE", _uiState.value.savePath)
+        repository.sendAction("DELETE CONVERSATION", _uiState.value.savePath)
     }
 
     fun onNewChatButtonPress() {

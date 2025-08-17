@@ -125,6 +125,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupUI() {
         recordButton = findViewById(R.id.recordButton)
         deleteButton = findViewById(R.id.deleteButton)
+        deleteButton.text = "Delete Conversation"
         newChatButton = findViewById(R.id.newChatButton)
         newChatButton.text = "New Conversation"
         settingsButton = findViewById(R.id.settingsButton)
