@@ -4,5 +4,6 @@ COPY chat/requirements.txt server/chat/requirements.txt
 RUN pip install --no-cache-dir -r server/chat/requirements.txt
 
 COPY chat/chat.py server/chat/chat.py
+COPY chat/tools.py server/chat/tools.py
 
 CMD ["python", "-m", "server.chat.chat"]
