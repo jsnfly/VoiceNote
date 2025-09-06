@@ -66,7 +66,13 @@ class ChatServer(BaseServer):
         prompt_token_ids = self.tokenizer.apply_chat_template(history, add_generation_prompt=True,
                                                               enable_thinking=self.thinking_enabled)
         request_id = received[0]['id']
-        sampling_params = SamplingParams(max_tokens=8192)
+        sampling_params = SamplingParams(
+            max_tokens=8192,
+            temperature=0.6 if self.thinking_enabled else 0.7,
+            top_p=0.95 if self.thinking_enabled else 0.8,
+            top_k=20,
+            min_p=0
+        )
         results_generator = self.engine.generate(prompt=TokensPrompt(prompt_token_ids=prompt_token_ids),
                                                  sampling_params=sampling_params, request_id=request_id)
 
@@ -199,20 +205,6 @@ class ChatServer(BaseServer):
         except asyncio.CancelledError:
             await self.engine.abort(request_id)
             raise
-
-    def _recv_client_messages(self) -> List[Message.DataDict]:
-        text_messages = []
-        for msg in super()._recv_client_messages():
-            if msg.get('action') == 'NEW CONVERSATION':
-                self.system_prompt = self.tool_manager.get_default_system_prompt()
-                self.reset_conversation()
-            else:
-                text_messages.append(msg)
-        return text_messages
-
-    def _get_cutoff_idx(self, received: List[Message.DataDict]) -> int:
-        return int(len(received) > 0)
-
 
 if __name__ == '__main__':
     asyncio.run(ChatServer('0.0.0.0', '12346', TTS_URI).serve_forever())
