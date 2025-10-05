@@ -233,21 +233,25 @@ class TTSServer(BaseServer):
                     current_id = received[0]['id']
                     text = ''.join(msg['text'] for msg in received)
                     finished = received[-1]['status'] == 'FINISHED'
-                    print(text, finished)
 
                     if len(text.split()) >= 2 or finished:
                         # Only add whole words or the end of the text.
                         await self.generator.add_text(text)
                         received = []
-                    if finished:
+                    if finished or text == 'Let me think about that.':
+                        # The generator seems to keep some kind of rolling window state and if we don't finish after
+                        # this, the audio will not be generated completely.
                         await self.generator.finish()
 
                 if current_id is not None and not self.generator.audio_queue.empty():
                     audio = await self.generator.get_audio_chunk()
                     if audio is None:
-                        self.streams['client'].send({'audio': b'', 'status': 'FINISHED', 'id': current_id})
+                        if finished:
+                            # For 'Let me think..' `finished` will not be true.
+                            self.streams['client'].send({'audio': b'', 'status': 'FINISHED', 'id': current_id})
                         await self.generator.restart()
                         current_id = None
+                        finished = False  # Reset
                     else:
                         bytes_ = audio.cpu().numpy().tobytes()
                         self.streams['client'].send({'audio': bytes_, 'status': 'GENERATING', 'id': current_id,
