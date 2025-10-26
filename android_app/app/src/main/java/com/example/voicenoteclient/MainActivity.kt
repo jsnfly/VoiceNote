@@ -9,13 +9,11 @@ import android.text.method.ScrollingMovementMethod
 import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.widget.addTextChangedListener
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import java.io.File
@@ -126,7 +124,7 @@ class MainActivity : AppCompatActivity() {
         recordButton = findViewById(R.id.recordButton)
         deleteButton = findViewById(R.id.deleteButton)
         deleteButton.text = "Delete Conversation"
-        newChatButton = findViewById(R.id.newChatButton)
+        newChatButton = findViewById(R.id.newConversationButton)
         newChatButton.text = "New Conversation"
         settingsButton = findViewById(R.id.settingsButton)
         transcriptionView = findViewById(R.id.transcription)

@@ -46,66 +46,25 @@
 
     <Button
         android:id="@+id/deleteButton"
-        android:layout_width="wrap_content"
+        android:layout_width="170dp"
         android:layout_height="wrap_content"
         android:layout_below="@+id/recordButton"
-        android:layout_marginTop="0dp"
-        android:layout_marginEnd="25dp"
+        android:layout_marginStart="15dp"
+        android:layout_marginEnd="-30dp"
         android:layout_toStartOf="@+id/recordButton"
         android:enabled="false"
-        android:text="@string/del" />
+        android:text="@string/delete_conversation" />
 
     <Button
-        android:id="@+id/wrongButton"
-        android:layout_width="wrap_content"
+        android:id="@+id/newConversationButton"
+        android:layout_width="170dp"
         android:layout_height="wrap_content"
         android:layout_below="@+id/recordButton"
-        android:layout_marginStart="25dp"
-        android:layout_marginTop="0dp"
-        android:layout_toEndOf="@+id/recordButton"
-        android:enabled="false"
-        android:text="@string/wrong" />
 
-    <Button
-        android:id="@+id/newChatButton"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_below="@+id/recordButton"
-        android:layout_marginStart="-7dp"
-        android:layout_marginTop="0dp"
-        android:layout_alignStart="@id/recordButton"
+        android:layout_alignParentEnd="true"
+        android:layout_marginEnd="15dp"
         android:enabled="true"
-        android:text="@string/new_chat" />
-
-    <TextView
-        android:id="@+id/topic"
-        android:layout_width="82dp"
-        android:layout_height="wrap_content"
-        android:layout_alignParentStart="true"
-        android:layout_alignParentTop="true"
-        android:layout_marginStart="11dp"
-        android:layout_marginTop="407dp"
-        android:fontFamily="sans-serif-condensed-light"
-        android:text="@string/topic"
-        android:textAlignment="center"
-        android:textSize="24sp"
-        android:textStyle="bold"
-        tools:ignore="TextSizeCheck" />
-
-    <EditText
-        android:id="@+id/editTextTopic"
-        android:layout_width="243dp"
-        android:layout_height="48dp"
-        android:layout_alignTop="@+id/topic"
-        android:layout_alignParentTop="true"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="402dp"
-        android:layout_toEndOf="@+id/topic"
-        android:autofillHints="Topic of the audio message"
-        android:inputType="textShortMessage"
-        android:text="@string/default_topic"
-        android:textSize="24sp"
-        tools:ignore="LabelFor,SpeakableTextPresentCheck" />
+        android:text="@string/new_conversation" />
 
     <Button
         android:id="@+id/settingsButton"
@@ -157,25 +116,6 @@
             android:autofillHints="server port number"
             tools:ignore="LabelFor"
             android:inputType="textUri" />
-
-        <LinearLayout
-            android:id="@+id/chatModeLayout"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <TextView
-                android:id="@+id/textViewChatMode"
-                android:text="@string/chat_mode"
-                android:layout_width="92dp"
-                android:layout_height="wrap_content" />
-
-            <CheckBox
-                android:id="@+id/checkBoxChatMode"
-                android:layout_width="wrap_content"
-                android:checked="true"
-                android:layout_height="wrap_content" />
-        </LinearLayout>
 
         <Button
             android:id="@+id/saveSettingsButton"
