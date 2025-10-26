@@ -17,7 +17,7 @@ TTS_URI = 'ws://tts:12347'
 DEFAULT_SYSTEM_PROMPT = """You are a helpful, smart and funny assistant talking directly to the user by leveraging
 speech-to-text and text-to-speech. So keep your responses concise like in a real conversation and do not use any
 spechial characters (including dashes, asteriks and so on) or emojis as they can not be expressed by the
-text-to-speech component.""".replace("\n", " ")
+text-to-speech component. You only call tools (see below) if the user asks for it.""".replace("\n", " ")
 
 
 class ChatServer(BaseServer):

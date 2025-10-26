@@ -49,7 +49,9 @@ class STTServer(BaseServer):
         self.conversation = Conversation()
 
     async def handle_connection(self, client_connection: WebSocketServerProtocol) -> None:
-        self._new_conversation()
+        if self.conversation is None:
+            # Do not start a new conversation for each new connection.
+            self._new_conversation()
         await super().handle_connection(client_connection)
 
     def _recv_client_messages(self) -> List[Message.DataDict]:
