@@ -7,7 +7,9 @@ A chat app for end-to-end voice conversations with LLMs that stores the conversa
 - Clone the model repositories to the `models` directory:
     1. Speech-to-text: https://huggingface.co/openai/whisper-medium
     2. Chat: https://huggingface.co/Qwen/Qwen3-8B-FP8
-    3. Text-to-Speech: https://huggingface.co/kyutai/tts-1.6b-en_fr, https://huggingface.co/kyutai/tts-voices
+    3. Text-to-Speech: https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-Base
+
+- Put a voice sample for the Text-to-Speech in the `server/tts` folder.
 
 - **For the python client** the requirements in `client/requirements.txt` must be installed. For PyAudio the dev
 libraries of PortAudio need to be installed (cf. `server/stt/Dockerfile`)

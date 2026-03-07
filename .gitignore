@@ -4,3 +4,4 @@ voice_note/outputs
 
 *__pycache__*
 models
+**/*.wav
