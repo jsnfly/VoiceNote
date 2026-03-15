@@ -1,1 +1,1 @@
-qwen-tts @ git+https://github.com/jsnfly/Qwen3-TTS-Realtime-Streaming.git@544c511
+moshi==0.2.11

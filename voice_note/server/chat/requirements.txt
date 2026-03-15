@@ -1,2 +1,1 @@
 vllm==0.10.0
-transformers==4.54.0  # If not pinned, vllm installs a newer version with gives and error when loading the model
