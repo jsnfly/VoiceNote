@@ -1,1 +1,1 @@
-qwen-tts @ git+https://github.com/jsnfly/Qwen3-TTS-Realtime-Streaming.git@8035f8b
+qwen-tts @ git+https://github.com/jsnfly/Qwen3-TTS-Realtime-Streaming.git@544c511

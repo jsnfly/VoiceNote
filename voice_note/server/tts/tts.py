@@ -286,6 +286,7 @@ class AsyncTTSGenerator:
 
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA is required for TTS server.")
+        self._configure_cuda_math()
         self.device = torch.device("cuda")
         self.dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         self.tts, self.config = self._build_tts()
@@ -304,8 +305,76 @@ class AsyncTTSGenerator:
 
         # Decode is much faster on CUDA, so move tokenizer back after prompt construction.
         self._move_speech_tokenizer_to_device(self.device)
+        self._compile_code_predictor()
         self.sample_rate = DEFAULT_SAMPLE_RATE
         print(f"[tts] loaded on {self.device} ({self.dtype})")
+
+    @staticmethod
+    def _configure_cuda_math() -> None:
+        torch.set_float32_matmul_precision("high")
+        if hasattr(torch.backends, "cuda") and hasattr(torch.backends.cuda, "matmul"):
+            torch.backends.cuda.matmul.allow_tf32 = True
+        if hasattr(torch.backends, "cudnn"):
+            torch.backends.cudnn.allow_tf32 = True
+
+    def _compile_code_predictor(self) -> None:
+        inductor_config = getattr(torch, "_inductor", None)
+        config_mod = getattr(inductor_config, "config", None)
+        triton_cfg = getattr(config_mod, "triton", None)
+        if triton_cfg is not None and hasattr(triton_cfg, "cudagraphs"):
+            triton_cfg.cudagraphs = False
+        code_predictor = self.tts.model.talker.code_predictor
+        print("[compile] code_predictor scope=model backend=inductor mode=default cudagraphs=off")
+        code_predictor.model = torch.compile(code_predictor.model, backend="inductor", mode="default")
+        self._warmup_compiled_talker_step()
+
+    def _warmup_compiled_talker_step(self) -> None:
+        streamer = StreamingTextState(self.tts, holdback_tokens=TOKEN_HOLDBACK)
+        streamer.push_text("Warm up.", final_chunk=True)
+        input_ids = streamer.current_input_ids()
+        talker_input_embeds, attention_mask, tts_pad_embed = build_talker_inputs_xvector(
+            tts_model=self.tts,
+            input_id=input_ids,
+            voice_clone_prompt=self.voice_clone_prompt,
+            language=LANGUAGE,
+        )
+        trailing_text_hidden = streamer.trailing_text_hidden()
+
+        with torch.inference_mode():
+            prefill = self.tts.model.talker(
+                inputs_embeds=talker_input_embeds,
+                attention_mask=attention_mask,
+                use_cache=True,
+                output_hidden_states=False,
+                return_dict=True,
+                trailing_text_hidden=trailing_text_hidden,
+                tts_pad_embed=tts_pad_embed,
+            )
+
+            input_token = torch.tensor(
+                [[self.config.talker_config.codec_bos_id]],
+                device=self.tts.model.device,
+                dtype=attention_mask.dtype,
+            )
+            cache_position = torch.tensor([attention_mask.shape[1]], device=attention_mask.device, dtype=torch.long)
+            step_attention_mask = torch.cat(
+                [attention_mask, torch.ones((1, 1), device=attention_mask.device, dtype=attention_mask.dtype)],
+                dim=1,
+            )
+            self.tts.model.talker(
+                input_ids=input_token,
+                attention_mask=step_attention_mask,
+                past_key_values=prefill.past_key_values,
+                use_cache=True,
+                output_hidden_states=False,
+                return_dict=True,
+                past_hidden=prefill.past_hidden,
+                generation_step=prefill.generation_step,
+                trailing_text_hidden=trailing_text_hidden,
+                tts_pad_embed=tts_pad_embed,
+                cache_position=cache_position,
+            )
+        torch.cuda.synchronize()
 
     def _move_speech_tokenizer_to_device(self, device: torch.device) -> None:
         """Move tokenizer wrapper + underlying model and keep wrapper device in sync."""
@@ -625,7 +694,9 @@ class TTSServer(BaseServer):
                         audio = await self.generator.get_audio_chunk()
                         if audio is None:
                             if finished:
-                                self.streams["client"].send({"audio": b"", "status": "FINISHED", "id": current_id})
+                                self.streams["client"].send({
+                                    "audio": b"", "status": "FINISHED", "id": current_id, "config": self.audio_config
+                                })
                             await self.generator.restart()
                             current_id = None
                             pending_text = ""
