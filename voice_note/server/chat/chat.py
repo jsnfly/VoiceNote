@@ -8,13 +8,13 @@ from vllm.sampling_params import SamplingParams
 from vllm import TokensPrompt
 
 from server.base_server import BaseServer
-from server.chat.tools import TOOLS, MINIMAL_MODE_SYSTEM_PROMPT
+from server.chat.tools import TOOLS
 from server.utils.streaming_connection import POLL_INTERVAL
 from server.utils.message import Message
 
 CHAT_MODEL = './models/chat/Qwen3-8B-FP8'
 TTS_URI = 'ws://tts:12347'
-DEFAULT_SYSTEM_PROMPT = """You are a helpful, smart and funny assistant talking directly to the user by leveraging
+BASE_SYSTEM_PROMPT = """You are a helpful, smart and funny assistant talking directly to the user by leveraging
 speech-to-text and text-to-speech. So keep your responses concise like in a real conversation and do not use any
 spechial characters (including dashes, asteriks and so on) or emojis as they can not be expressed by the
 text-to-speech component. You only call tools (see below) if the user asks for it.""".replace("\n", " ")
@@ -24,9 +24,9 @@ class ChatServer(BaseServer):
 
     def __init__(self, host: str, port: int, tts_uri: Union[str, None] = None):
         super().__init__("chat", host, port)
-        self.system_prompt = DEFAULT_SYSTEM_PROMPT
-        self.reset_conversation()
+        self.custom_system_prompt = None
         self.thinking_enabled = False
+        self.reset_conversation()
 
         engine_args = AsyncEngineArgs(model=CHAT_MODEL, tensor_parallel_size=1, gpu_memory_utilization=0.6,
                                       max_model_len=32768, max_num_seqs=1)
@@ -41,13 +41,43 @@ class ChatServer(BaseServer):
         self.tokenizer = await self.engine.get_tokenizer()
         await super().serve_forever()
 
+    def _get_system_prompt(self) -> str:
+        if self.custom_system_prompt:
+            return f"{BASE_SYSTEM_PROMPT} {self.custom_system_prompt}"
+        return BASE_SYSTEM_PROMPT
+
+    def _reset_settings(self) -> None:
+        self.custom_system_prompt = None
+        self.thinking_enabled = False
+
     def reset_conversation(self) -> None:
-        self.history = [{'role': 'system', 'content': self.system_prompt}] if self.system_prompt else []
+        self.history = [{'role': 'system', 'content': self._get_system_prompt()}]
+
+    def _apply_tool_call(self, tool_call: dict) -> str:
+        if tool_call['name'] != 'update_chat_settings':
+            return ''
+
+        arguments = tool_call['arguments']
+        updates = []
+
+        system_prompt = arguments.get('system_prompt')
+        if system_prompt is not None and system_prompt != self.custom_system_prompt:
+            self.custom_system_prompt = system_prompt
+            self.reset_conversation()
+            updates.append('updated how I should respond going forward')
+
+        thinking_enabled = arguments.get('thinking_enabled')
+        if thinking_enabled is not None and thinking_enabled != self.thinking_enabled:
+            self.thinking_enabled = thinking_enabled
+            updates.append(f"thinking mode {'enabled' if thinking_enabled else 'disabled'}")
+
+        return '. '.join(updates).capitalize() + '.' if updates else ''
 
     def _recv_client_messages(self) -> List[Message.DataDict]:
         text_messages = []
         for msg in super()._recv_client_messages():
             if msg.get('action') == 'NEW CONVERSATION':
+                self._reset_settings()
                 self.reset_conversation()
             else:
                 text_messages.append(msg)
@@ -81,39 +111,21 @@ class ChatServer(BaseServer):
                 stream_text = ''
                 generated_text = request_output.outputs[0].text
                 if generated_text.count("<think>") > generated_text.count("</think>"):
-                    # Thinking
-                    if idx == 1 and self.system_prompt != MINIMAL_MODE_SYSTEM_PROMPT:
+                    if idx == 1 and self.thinking_enabled:
                         stream_text = 'Let me think about that.'
                 elif generated_text.count("<tool_call>") > generated_text.count("</tool_call>"):
-                    # Tool call
                     pass
                 else:
                     for tool_call_str in re.findall(r"<tool_call>(.+?)</tool_call>", generated_text, re.DOTALL):
                         tool_call_str = tool_call_str.strip()
                         if tool_call_str not in tool_calls:
                             tool_call = json.loads(tool_call_str)
-                            if tool_call['name'] == 'enable_thinking_mode':
-                                enable = tool_call['arguments']['enable']
-                                self.thinking_enabled = enable
-                                tool_calls[tool_call_str] = {
-                                    'name': tool_call['name'],
-                                    'content': f"thinking mode {'enabled' if enable else 'diabled'}."
-                                }
-                                if enable:
-                                    stream_text = 'Thinking mode enabled.'
-                                else:
-                                    stream_text = 'Thinking mode disabled.'
-                            elif tool_call['name'] == 'enable_minimal_mode':
-                                enable = tool_call['arguments']['enable']
-                                self.system_prompt = MINIMAL_MODE_SYSTEM_PROMPT if enable else DEFAULT_SYSTEM_PROMPT
-                                self.reset_conversation()
-                                tool_calls[tool_call_str] = {
-                                    'name': tool_call['name'],
-                                }
-                                if enable:
-                                    stream_text = 'Starting a new conversation with minimal mode enabled.'
-                                else:
-                                    stream_text = 'Starting a new conversation with minimal mode disabled.'
+                            tool_response = self._apply_tool_call(tool_call)
+                            tool_calls[tool_call_str] = {
+                                'name': tool_call['name'],
+                                'content': tool_response,
+                            }
+                            stream_text = tool_response
 
                     new_text = generated_text[len(processed_text):]
                     processed_text = generated_text
