@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple, Union
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
 from server.base_server import BaseServer, ThreadExecutor
-from websockets.server import WebSocketServerProtocol
+from websockets.asyncio.server import ServerConnection
 from server.utils.audio import AudioConfig
 from server.utils.conversation import Conversation
 from server.utils.message import Message
@@ -48,7 +48,7 @@ class STTServer(BaseServer):
     def _new_conversation(self) -> None:
         self.conversation = Conversation()
 
-    async def handle_connection(self, client_connection: WebSocketServerProtocol) -> None:
+    async def handle_connection(self, client_connection: ServerConnection) -> None:
         if self.conversation is None:
             # Do not start a new conversation for each new connection.
             self._new_conversation()
@@ -70,7 +70,7 @@ class STTServer(BaseServer):
                 self._new_conversation()
                 if 'chat' in self.streams:
                     self.streams['chat'].reset(msg['id'])
-                self.streams['chat'].send(msg)
+                    self.streams['chat'].send(msg)
             else:
                 audio_messages.append(msg)
         return audio_messages

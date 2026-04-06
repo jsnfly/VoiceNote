@@ -1,7 +1,7 @@
 import asyncio
 import threading
 import websockets
-from websockets.server import serve, WebSocketServerProtocol
+from websockets.asyncio.server import ServerConnection, serve
 from typing import Any, List
 
 from server.utils.streaming_connection import POLL_INTERVAL, StreamingConnection, StreamReset
@@ -36,7 +36,7 @@ class BaseServer:
         async with serve(self.handle_connection, self.host, self.port):
             await asyncio.Future()
 
-    async def handle_connection(self, client_connection: WebSocketServerProtocol) -> None:
+    async def handle_connection(self, client_connection: ServerConnection) -> None:
         print(f"Connection from {client_connection.remote_address}")
         for stream in self.streams.values():
             await stream.close()
@@ -46,16 +46,27 @@ class BaseServer:
             self.streams[key] = await self.setup_connection(key, uri)
         self.streams['client'] = StreamingConnection(f"{self.name}_client", client_connection)
 
-        _, pending = await asyncio.wait(self._create_tasks(), return_when=asyncio.FIRST_COMPLETED)
+        tasks = self._create_tasks()
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        first_exception = next((task.exception() for task in done if task.exception() is not None), None)
         StreamingConnection.cancel_tasks(pending)
+        for task in pending:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        for stream in self.streams.values():
+            await stream.close()
         self.streams = {}
+        if first_exception is not None:
+            raise first_exception
 
     async def setup_connection(self, connection_name: str, uri: str) -> StreamingConnection:
         while True:
             try:
                 connection = await websockets.connect(uri)
                 break
-            except ConnectionRefusedError:
+            except OSError:
                 await asyncio.sleep(POLL_INTERVAL)
         return StreamingConnection(f"{self.name}_{connection_name}", connection)
 
@@ -65,6 +76,7 @@ class BaseServer:
 
     async def _handle_workload(self) -> None:
         received = []
+        workload = None
         while True:
             try:
                 received += self._recv_client_messages()
@@ -90,7 +102,8 @@ class BaseServer:
                 # sent to it.
                 [stream.reset(e.id) for key, stream in self.streams.items() if key != 'client']
                 received = []
-                workload.cancel()
+                if workload is not None and not workload.done():
+                    workload.cancel()
             except ConnectionError:
                 break
 

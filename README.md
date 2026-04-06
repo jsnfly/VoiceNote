@@ -16,3 +16,25 @@ libraries of PortAudio need to be installed (cf. `server/stt/Dockerfile`)
 
 1. Server: Assuming Docker Compose is installed: Execute `./run.sh` in the `server` directory.
 2. Python-Client: `python -m client.client` (in `voice_note` directory)
+
+## Tests
+
+The current automated tests are async integration tests around the websocket streaming layer and fake server pipelines.
+
+Install the minimal test dependencies into your existing Python environment:
+
+```bash
+python -m pip install pytest pytest-asyncio websockets
+```
+
+Run the current test suite from the `voice_note` directory:
+
+```bash
+pytest -q tests/test_streaming_connection.py
+```
+
+If more tests are added later, you can run all tests with:
+
+```bash
+pytest -q
+```

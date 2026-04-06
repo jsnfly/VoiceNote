@@ -3,8 +3,8 @@ import logging
 from datetime import datetime
 from hashlib import md5
 from typing import List, Union
-from websockets.server import WebSocketServerProtocol
-from websockets.client import WebSocketClientProtocol
+from websockets.asyncio.client import ClientConnection
+from websockets.asyncio.server import ServerConnection
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 from queue import SimpleQueue, Empty
 
@@ -22,7 +22,7 @@ class StreamReset(Exception):
 
 
 class StreamingConnection:
-    def __init__(self, name: str, connection: Union[WebSocketClientProtocol, WebSocketServerProtocol]):
+    def __init__(self, name: str, connection: Union[ClientConnection, ServerConnection]):
         self._setup_logger(name)
         self.connection = connection
         self.received_q = SimpleQueue()
@@ -111,6 +111,9 @@ class StreamingConnection:
 
         self.logger = logging.getLogger(name)
         self.logger.setLevel(logging.DEBUG)
+        if self.logger.handlers:
+            return
+
         file_handler = logging.FileHandler(f"{LOG_DIR}/{name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
         formatter = logging.Formatter('%(asctime)s,%(msecs)03d - %(levelname)s - %(message)s',
                                       datefmt='%Y-%m-%d %H:%M:%S')

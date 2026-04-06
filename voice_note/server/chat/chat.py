@@ -141,11 +141,12 @@ class ChatServer(BaseServer):
                         'text': stream_text,
                         'id': request_id
                     })
-                    self.streams['tts'].send({
-                        'status': 'FINISHED' if is_finished else 'GENERATING',
-                        'text': stream_text,
-                        'id': request_id
-                    })
+                    if 'tts' in self.streams:
+                        self.streams['tts'].send({
+                            'status': 'FINISHED' if is_finished else 'GENERATING',
+                            'text': stream_text,
+                            'id': request_id
+                        })
                 await asyncio.sleep(POLL_INTERVAL)
 
             print(generated_text)
