@@ -29,8 +29,11 @@ services:
       context: .
       dockerfile: chat/Dockerfile
     container_name: voice_note_chat
+    environment:
+      CHAT_MODEL: /usr/src/app/models/chat/Qwen3.5-9B-GGUF/Qwen3.5-9B-Q8_0.gguf
+      CHAT_MMPROJ: /usr/src/app/models/chat/Qwen3.5-9B-GGUF/mmproj-F16.gguf
     volumes:
-      - ../models/chat/Qwen3-8B-FP8:/usr/src/app/models/chat/Qwen3-8B-FP8:ro
+      - ../models/chat/Qwen3.5-9B-GGUF:/usr/src/app/models/chat/Qwen3.5-9B-GGUF:ro
       - ../logs:/usr/src/app/logs
     expose:
       - 12346
