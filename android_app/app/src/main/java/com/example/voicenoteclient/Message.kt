@@ -1,3 +1,5 @@
+package com.example.voicenoteclient
+
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import java.util.Base64
@@ -12,12 +14,13 @@ data class Message(val data: Map<String, Any?>) {
             return Message(destringifyValues(data))
         }
 
-        private fun destringifyValues(encodedData: Map<String, Any?>): Map<String, Any?> {
+        private fun destringifyValues(encodedData: Map<*, *>): Map<String, Any?> {
             val transformed = mutableMapOf<String, Any?>()
-            encodedData.forEach { (key, value) ->
+            encodedData.forEach { (rawKey, value) ->
+                val key = rawKey as? String ?: return@forEach
                 transformed[key.removeSuffix("_base64")] = when {
                     key.endsWith("_base64") && value is String -> Base64.getDecoder().decode(value)
-                    value is Map<*, *> -> destringifyValues(value as Map<String, Any?>)
+                    value is Map<*, *> -> destringifyValues(value)
                     else -> value
                 }
             }
@@ -35,7 +38,7 @@ data class Message(val data: Map<String, Any?>) {
         data.forEach { (key, value) ->
             when (value) {
                 is ByteArray -> transformed["${key}_base64"] = Base64.getEncoder().encodeToString(value)
-                is Map<*, *> -> transformed[key] = stringifyValues(value as Map<String, Any?>)
+                is Map<*, *> -> transformed[key] = stringifyValues(value.mapKeys { it.key.toString() })
                 else -> transformed[key] = value
             }
         }

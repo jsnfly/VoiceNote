@@ -1,126 +1,199 @@
 <?xml version="1.0" encoding="utf-8"?>
 
-<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
-
-    <Button
-        android:id="@+id/recordButton"
-        android:layout_width="100dp"
-        android:layout_height="100dp"
-        android:layout_below="@+id/transcription"
-        android:layout_centerHorizontal="true"
-        android:layout_marginTop="2dp"
-        android:alpha="1.0"
-        android:backgroundTint="#F44336"
-        android:scaleX="0.88"
-        android:textAlignment="viewStart"
-        android:textAllCaps="false"
-        android:textSize="0sp"
-        android:translationY="10dp"
-        android:visibility="visible"
-        app:cornerRadius="550dp"
-        app:icon="@android:drawable/ic_btn_speak_now"
-        app:iconGravity="textStart"
-        app:iconPadding="0dp"
-        app:iconSize="80dp"
-        app:iconTint="#CDD8CE"
-        tools:ignore="SpeakableTextPresentCheck" />
-
-    <TextView
-        android:id="@+id/transcription"
-        android:layout_width="280dp"
-        android:layout_height="220dp"
-        android:layout_centerHorizontal="true"
-        android:background="@android:color/system_accent1_100"
-        android:hint="@string/default_transcription"
-        android:scrollbarAlwaysDrawVerticalTrack="true"
-        android:scrollbarThumbVertical="@color/purple_200"
-        android:scrollbars="vertical"
-        android:textColor="@color/purple_200"
-        android:textColorHint="@android:color/primary_text_light"
-        android:textSize="18sp"
-        android:translationY="10dp" />
-
-    <Button
-        android:id="@+id/deleteButton"
-        android:layout_width="170dp"
-        android:layout_height="wrap_content"
-        android:layout_below="@+id/recordButton"
-        android:layout_marginStart="15dp"
-        android:layout_marginEnd="-30dp"
-        android:layout_toStartOf="@+id/recordButton"
-        android:enabled="false"
-        android:text="@string/delete_conversation" />
-
-    <Button
-        android:id="@+id/newConversationButton"
-        android:layout_width="170dp"
-        android:layout_height="wrap_content"
-        android:layout_below="@+id/recordButton"
-
-        android:layout_alignParentEnd="true"
-        android:layout_marginEnd="15dp"
-        android:enabled="true"
-        android:text="@string/new_conversation" />
-
-    <Button
-        android:id="@+id/settingsButton"
-        android:layout_width="35dp"
-        android:layout_height="43dp"
-        android:layout_toEndOf="@+id/transcription"
-        android:translationX="10dp"
-        app:icon="@android:drawable/ic_menu_preferences"
-        app:iconGravity="textTop"
-        app:iconPadding="0dp"
-        app:iconSize="28dp"
-        tools:ignore="SpeakableTextPresentCheck,TouchTargetSizeCheck" />
+    android:layout_height="match_parent"
+    android:background="@color/app_background"
+    android:fillViewport="true">
 
     <LinearLayout
-        android:id="@+id/settingsLayout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_below="@id/settingsButton"
-        android:background="#CC3E3737"
         android:orientation="vertical"
-        android:visibility="gone">
+        android:paddingStart="20dp"
+        android:paddingTop="20dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="24dp">
 
-        <TextView
-            android:id="@+id/textViewHost"
-            android:text="@string/host"
-            android:layout_width="42dp"
-            android:layout_height="wrap_content" />
-
-        <EditText
-            android:id="@+id/editTextHost"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/default_host"
-            android:autofillHints="server ip address or hostname"
-            tools:ignore="LabelFor"
-            android:inputType="textUri" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
-        <TextView
-            android:id="@+id/textViewPort"
-            android:text="@string/port"
-            android:layout_width="42dp"
-            android:layout_height="wrap_content" />
+            <TextView
+                android:id="@+id/connectionStatus"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/connection_connecting"
+                android:textColor="@color/app_text_secondary"
+                android:textSize="14sp"
+                android:textStyle="bold" />
 
-        <EditText
-            android:id="@+id/editTextPort"
+            <Button
+                android:id="@+id/settingsButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minHeight="42dp"
+                android:text="@string/settings"
+                android:textAllCaps="false"
+                app:icon="@android:drawable/ic_menu_preferences"
+                app:iconPadding="4dp"
+                app:iconSize="18dp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/settingsLayout"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/default_port"
-            android:autofillHints="server port number"
-            tools:ignore="LabelFor"
-            android:inputType="textUri" />
+            android:layout_marginTop="12dp"
+            android:background="@color/app_panel"
+            android:orientation="vertical"
+            android:padding="14dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/textViewHost"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/host"
+                android:textColor="@color/app_text_primary"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/editTextHost"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:autofillHints="server ip address or hostname"
+                android:inputType="textUri"
+                android:text="@string/default_host"
+                tools:ignore="LabelFor" />
+
+            <TextView
+                android:id="@+id/textViewPort"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/port"
+                android:textColor="@color/app_text_primary"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/editTextPort"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:autofillHints="server port number"
+                android:inputType="number"
+                android:text="@string/default_port"
+                tools:ignore="LabelFor" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:gravity="end"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/reconnectButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/reconnect"
+                    android:textAllCaps="false" />
+
+                <Button
+                    android:id="@+id/saveSettingsButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="@string/save"
+                    android:textAllCaps="false" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:text="@string/transcription_label"
+            android:textColor="@color/app_text_primary"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/transcription"
+            android:layout_width="match_parent"
+            android:layout_height="260dp"
+            android:layout_marginTop="8dp"
+            android:background="@color/app_surface"
+            android:hint="@string/default_transcription"
+            android:padding="16dp"
+            android:scrollbarAlwaysDrawVerticalTrack="true"
+            android:scrollbarThumbVertical="@color/purple_200"
+            android:scrollbars="vertical"
+            android:textColor="@color/app_text_primary"
+            android:textColorHint="@color/app_text_secondary"
+            android:textSize="18sp" />
 
         <Button
-            android:id="@+id/saveSettingsButton"
-            android:layout_width="wrap_content"
+            android:id="@+id/recordButton"
+            android:layout_width="112dp"
+            android:layout_height="112dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="22dp"
+            android:backgroundTint="@color/app_record"
+            android:contentDescription="@string/hold_to_record"
+            android:text=""
+            android:textAllCaps="false"
+            app:cornerRadius="56dp"
+            app:icon="@android:drawable/ic_btn_speak_now"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp"
+            app:iconSize="76dp"
+            app:iconTint="@color/app_record_icon"
+            tools:ignore="SpeakableTextPresentCheck" />
+
+        <TextView
+            android:id="@+id/recordingHint"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/save" />
+            android:layout_marginTop="10dp"
+            android:gravity="center"
+            android:text="@string/waiting_for_server"
+            android:textColor="@color/app_text_secondary"
+            android:textSize="14sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:baselineAligned="false"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/deleteButton"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
+                android:enabled="false"
+                android:gravity="center"
+                android:text="@string/delete_conversation"
+                android:textAllCaps="false" />
+
+            <Button
+                android:id="@+id/newConversationButton"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:enabled="false"
+                android:gravity="center"
+                android:text="@string/new_conversation"
+                android:textAllCaps="false" />
+        </LinearLayout>
     </LinearLayout>
-</RelativeLayout>
+</ScrollView>

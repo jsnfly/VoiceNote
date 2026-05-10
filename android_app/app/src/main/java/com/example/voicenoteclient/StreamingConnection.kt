@@ -1,7 +1,11 @@
+package com.example.voicenoteclient
+
 import android.util.Log
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.*
 import io.ktor.http.cio.websocket.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.Channel
 
 class ConnectionClosedException(message: String = "Connection is closed") : Exception(message)
 
@@ -11,6 +15,7 @@ class StreamingConnection(
 ) {
     private var receivedChannel = Channel<Map<String, Any?>>(Channel.UNLIMITED)
     private var sendChannel = Channel<Map<String, Any?>>(Channel.UNLIMITED)
+    private val closeSignal = Channel<Unit>(1)
     private var closed = false
     var communicationID: String? = null
 
@@ -28,14 +33,16 @@ class StreamingConnection(
                 when (frame) {
                     is Frame.Text -> {
                         val message = Message.fromDataString(frame.readText())
-                        val status = message.data["status"] as? String
-                        val id = message.data["id"] as String
-                        if (status == "RESET") {
+                        val status = message.data[ProtocolKey.STATUS] as? String
+                        val id = message.data[ProtocolKey.ID] as? String
+                        if (id == null) {
+                            Log.d(AppLog.TAG, "Discarding msg without id.")
+                        } else if (status == ProtocolStatus.RESET) {
                             reset(id = id, propagate = false)
                         } else if (isValidMessage(id)) {
                             receivedChannel.send(message.data)
                         } else {
-                            Log.d("XXXXX", "Discarding msg with id $id.")
+                            Log.d(AppLog.TAG, "Discarding msg with id $id.")
                         }
                     }
                     else -> {}
@@ -43,25 +50,33 @@ class StreamingConnection(
             }
         } finally {
             receivedChannel.close()
+            notifyClosed()
         }
     }
 
     private suspend fun sendFromChannel() {
         try {
             for (data in sendChannel) {
-                Log.d("XXXXX", "Sending $data")
+                Log.d(AppLog.TAG, "Sending $data")
                 session.send(Message(data).encode())
             }
         } finally {
             sendChannel.close()
+            notifyClosed()
         }
     }
 
     fun send(data: Map<String, Any?>) {
+        val id = data[ProtocolKey.ID] as? String
         if (closed) {
             throw ConnectionClosedException("Connection is closed")
-        } else if (isValidMessage(data["id"] as String)) {
-            externalScope.launch { sendChannel.send(data) }
+        } else if (id == null) {
+            throw IllegalArgumentException("Message is missing id")
+        } else if (isValidMessage(id)) {
+            val result = sendChannel.trySend(data)
+            if (result.isFailure) {
+                throw ConnectionClosedException("Connection send queue is closed")
+            }
         } else {
             throw Exception("Reset in progress")
         }
@@ -72,8 +87,9 @@ class StreamingConnection(
         val received = mutableListOf<Map<String, Any?>>()
 
         // Non-blocking read of all currently available messages
-        while (!receivedChannel.isEmpty) {
-            received.add(receivedChannel.receive())
+        while (true) {
+            val next = receivedChannel.tryReceive().getOrNull() ?: break
+            received.add(next)
         }
         return received
     }
@@ -82,15 +98,15 @@ class StreamingConnection(
         communicationID = id
 
         // Clear queues non-blockingly
-        while (!receivedChannel.isEmpty) {
-            receivedChannel.receive()
+        while (true) {
+            receivedChannel.tryReceive().getOrNull() ?: break
         }
-        while (!sendChannel.isEmpty) {
-            sendChannel.receive()
+        while (true) {
+            sendChannel.tryReceive().getOrNull() ?: break
         }
 
         if (propagate) {
-            send(mapOf("id" to id, "status" to "RESET"))
+            send(mapOf(ProtocolKey.ID to id, ProtocolKey.STATUS to ProtocolStatus.RESET))
         }
     }
 
@@ -98,9 +114,19 @@ class StreamingConnection(
         return communicationID == null || communicationID == id
     }
 
-    suspend fun close() {
-        session.close()
+    suspend fun awaitClosed() {
+        closeSignal.receive()
+    }
+
+    fun close() {
+        closed = true
+        notifyClosed()
         receivedChannel.close()
         sendChannel.close()
+        externalScope.launch { session.close() }
+    }
+
+    private fun notifyClosed() {
+        closeSignal.trySend(Unit)
     }
 }

@@ -2,13 +2,14 @@ package com.example.voicenoteclient
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.os.Bundle
 import android.text.method.ScrollingMovementMethod
 import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -16,53 +17,17 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
-import java.io.File
-import java.io.FileWriter
-import java.io.IOException
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-
-
-fun ByteArray.toFloatArray(): FloatArray {
-    val buffer = ByteBuffer.wrap(this)
-    buffer.order(ByteOrder.LITTLE_ENDIAN) // Make sure to set the correct endianness
-    val floatArray = FloatArray(this.size / 4)
-    buffer.asFloatBuffer().get(floatArray)
-    return floatArray
-}
-
-class CustomExceptionHandler(private val context: Context) : Thread.UncaughtExceptionHandler {
-    private val defaultExceptionHandler = Thread.getDefaultUncaughtExceptionHandler()
-
-    override fun uncaughtException(thread: Thread, throwable: Throwable) {
-        try {
-            // Log the crash
-            val logFile = File(context.getExternalFilesDir(null), "crash_log.txt")
-            FileWriter(logFile, true).use { writer ->
-                writer.append("${System.currentTimeMillis()}: CRASH in thread ${thread.name}\n")
-                writer.append("Error: ${throwable.message}\n")
-                writer.append("Stack trace:\n")
-                throwable.stackTrace.forEach { element ->
-                    writer.append("    $element\n")
-                }
-                writer.append("\n")
-            }
-        } catch (e: IOException) {
-            Toast.makeText(context, "Failed to save log", Toast.LENGTH_LONG).show()
-        } finally {
-            // Make sure to call the default handler after logging
-            defaultExceptionHandler?.uncaughtException(thread, throwable)
-        }
-    }
-}
 
 class MainActivity : AppCompatActivity() {
-    private val AUDIO_PERMISSION_REQUEST_CODE = 123
-
     private lateinit var recordButton: Button
     private lateinit var deleteButton: Button
     private lateinit var newChatButton: Button
     private lateinit var settingsButton: Button
+    private lateinit var reconnectButton: Button
+    private lateinit var hostInput: EditText
+    private lateinit var portInput: EditText
+    private lateinit var connectionStatusView: TextView
+    private lateinit var recordingHintView: TextView
     private lateinit var transcriptionView: TextView
 
     private val viewModel: MainViewModel by viewModels {
@@ -72,7 +37,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        Thread.setDefaultUncaughtExceptionHandler(CustomExceptionHandler(applicationContext))
+        Thread.setDefaultUncaughtExceptionHandler(CrashLogger(applicationContext))
 
         setupUI()
         observeViewModel()
@@ -91,8 +56,30 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             viewModel.uiState.collect { state ->
                 transcriptionView.text = state.transcriptionText
-                deleteButton.isEnabled = state.isActionButtonsEnabled
-                recordButton.alpha = if (state.isRecording) 0.25f else 1.0f
+                val isConnected = state.connectionStatus == ConnectionStatus.CONNECTED
+                connectionStatusView.text = connectionStatusText(state.connectionStatus)
+                connectionStatusView.setTextColor(connectionStatusColor(state.connectionStatus))
+                recordingHintView.text = when {
+                    state.isRecording -> getString(R.string.recording)
+                    isConnected -> getString(R.string.hold_to_record)
+                    else -> getString(R.string.waiting_for_server)
+                }
+                deleteButton.isEnabled = state.isActionButtonsEnabled && isConnected
+                newChatButton.isEnabled = isConnected
+                recordButton.isEnabled = isConnected
+                reconnectButton.isEnabled = state.connectionStatus != ConnectionStatus.CONNECTING
+                recordButton.alpha = when {
+                    state.isRecording -> 0.35f
+                    isConnected -> 1.0f
+                    else -> 0.55f
+                }
+
+                if (!hostInput.hasFocus() && hostInput.text.toString() != state.serverSettings.host) {
+                    hostInput.setText(state.serverSettings.host)
+                }
+                if (!portInput.hasFocus() && portInput.text.toString() != state.serverSettings.port.toString()) {
+                    portInput.setText(state.serverSettings.port.toString())
+                }
             }
         }
     }
@@ -123,11 +110,14 @@ class MainActivity : AppCompatActivity() {
     private fun setupUI() {
         recordButton = findViewById(R.id.recordButton)
         deleteButton = findViewById(R.id.deleteButton)
-        deleteButton.text = "Delete Conversation"
         newChatButton = findViewById(R.id.newConversationButton)
-        newChatButton.text = "New Conversation"
         settingsButton = findViewById(R.id.settingsButton)
+        reconnectButton = findViewById(R.id.reconnectButton)
         transcriptionView = findViewById(R.id.transcription)
+        connectionStatusView = findViewById(R.id.connectionStatus)
+        recordingHintView = findViewById(R.id.recordingHint)
+        hostInput = findViewById(R.id.editTextHost)
+        portInput = findViewById(R.id.editTextPort)
 
         transcriptionView.movementMethod = ScrollingMovementMethod()
 
@@ -142,18 +132,43 @@ class MainActivity : AppCompatActivity() {
 
         deleteButton.setOnClickListener { viewModel.onDeleteButtonPress() }
         newChatButton.setOnClickListener { viewModel.onNewChatButtonPress() }
+        reconnectButton.setOnClickListener { viewModel.onReconnectButtonPress() }
 
         val settingsLayout: LinearLayout = findViewById(R.id.settingsLayout)
         val saveButton: Button = findViewById(R.id.saveSettingsButton)
         settingsButton.setOnClickListener {
-            if (settingsLayout.visibility == View.VISIBLE) {
-                settingsLayout.visibility = View.GONE
-            } else {
-                settingsLayout.visibility = View.VISIBLE
-            }
+            settingsLayout.visibility = if (settingsLayout.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         }
         saveButton.setOnClickListener {
+            val host = hostInput.text.toString().trim()
+            val port = portInput.text.toString().toIntOrNull()
+            if (host.isBlank() || port == null || port !in 1..65535) {
+                Toast.makeText(this, "Enter a valid host and port", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+
+            viewModel.onSaveSettings(host, port)
             settingsLayout.visibility = View.GONE
+        }
+    }
+
+    private companion object {
+        const val AUDIO_PERMISSION_REQUEST_CODE = 123
+    }
+
+    private fun connectionStatusText(status: ConnectionStatus): String {
+        return when (status) {
+            ConnectionStatus.CONNECTING -> getString(R.string.connection_connecting)
+            ConnectionStatus.CONNECTED -> getString(R.string.connection_connected)
+            ConnectionStatus.DISCONNECTED -> getString(R.string.connection_disconnected)
+        }
+    }
+
+    private fun connectionStatusColor(status: ConnectionStatus): Int {
+        return when (status) {
+            ConnectionStatus.CONNECTING -> Color.rgb(141, 103, 18)
+            ConnectionStatus.CONNECTED -> Color.rgb(35, 112, 68)
+            ConnectionStatus.DISCONNECTED -> Color.rgb(176, 42, 55)
         }
     }
 }

@@ -1,27 +1,18 @@
 package com.example.voicenoteclient
 
+import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
-import android.media.AudioManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.CoroutineScope
 
-fun FloatArray.toShortArray(): ShortArray {
-    return this.map { sample ->
-        // Clamp the value to the range [-1.0, 1.0]
-        val clampedSample = sample.coerceIn(-1.0f, 1.0f)
-
-        // Scale and convert to a short (16-bit integer)
-        (clampedSample * Short.MAX_VALUE).toInt().toShort()
-    }.toShortArray()
-}
 class AudioPlayer(private val scope: CoroutineScope) {
 
     private var audioTrack: AudioTrack? = null
     private var isPlaying = false
-    private val sampleRate = 24000  // TODO: Consider moving this to a configuration or dynamic setting
+    private val sampleRate = AppDefaults.OUTPUT_SAMPLE_RATE
     private val audioQueue: Channel<ShortArray> = Channel(Channel.UNLIMITED)
     private val bufferSize = AudioTrack.getMinBufferSize(
         sampleRate,
@@ -30,14 +21,23 @@ class AudioPlayer(private val scope: CoroutineScope) {
     )
 
     init {
-        audioTrack = AudioTrack(
-            AudioManager.STREAM_MUSIC,
-            sampleRate,
-            AudioFormat.CHANNEL_OUT_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            bufferSize,
-            AudioTrack.MODE_STREAM
-        )
+        audioTrack = AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .build()
+            )
+            .setBufferSizeInBytes(bufferSize)
+            .setTransferMode(AudioTrack.MODE_STREAM)
+            .build()
         startAudioJob()
     }
 
