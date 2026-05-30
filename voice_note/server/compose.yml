@@ -13,7 +13,7 @@ services:
       - ../models/whisper-medium:/usr/src/app/models/whisper-medium:ro
       - ../logs:/usr/src/app/logs
       - ../outputs:/usr/src/app/outputs
-    user: 1000:1000  # Same user as on host, so the created files have the same owner.
+    user: 1000:1000
     deploy:
       resources:
         reservations:
@@ -30,13 +30,49 @@ services:
       dockerfile: chat/Dockerfile
     container_name: voice_note_chat
     environment:
-      CHAT_MODEL: /usr/src/app/models/chat/Qwen3.5-9B-GGUF/Qwen3.5-9B-Q8_0.gguf
-      CHAT_MMPROJ: /usr/src/app/models/chat/Qwen3.5-9B-GGUF/mmproj-F16.gguf
+      CHAT_AGENT_CWD: /workspace
+      CHAT_AGENT_TOOLS: coding
+      PI_MODEL: Qwen3.5-9B-Q8_0
+      LLAMACPP_BASE_URL: http://llamacpp:8080/v1
+      TTS_URI: ws://tts:12347
     volumes:
-      - ../models/chat/Qwen3.5-9B-GGUF:/usr/src/app/models/chat/Qwen3.5-9B-GGUF:ro
       - ../logs:/usr/src/app/logs
+      - ../pi-agent:/usr/src/app/pi-agent
+      - ../..:/workspace
     expose:
       - 12346
+    depends_on:
+      - llamacpp
+      - tts
+    user: 1000:1000
+    networks:
+      - voice_note_net
+
+  llamacpp:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda13
+    container_name: voice_note_llamacpp
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --model
+      - /models/Qwen3.5-9B-Q8_0.gguf
+      - --alias
+      - Qwen3.5-9B-Q8_0
+      - --ctx-size
+      - "16384"
+      - --gpu-layers
+      - all
+      - --flash-attn
+      - "on"
+    volumes:
+      - ../models/chat/Qwen3.5-9B-GGUF:/models:ro
+      - ../logs:/usr/src/app/logs
+    expose:
+      - 8080
+    ports:
+      - 8080:8080
     deploy:
       resources:
         reservations:

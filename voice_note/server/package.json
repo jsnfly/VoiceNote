@@ -1,0 +1,11 @@
+{
+  "name": "voice-note-server",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.75.1"
+  },
+  "scripts": {
+    "pi": "pi"
+  }
+}

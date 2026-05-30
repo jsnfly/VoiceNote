@@ -1,7 +1,7 @@
 import asyncio
 import torch
 from pathlib import Path
-from typing import Dict, List, Tuple, Union
+from typing import List, Union
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
 from server.base_server import BaseServer, ThreadExecutor
@@ -19,7 +19,7 @@ LANG = 'en'
 
 DEVICE, DTYPE = ('cuda:0', torch.float16) if torch.cuda.is_available() else ('cpu', torch.float32)
 
-CHAT_URI = 'ws://chat:12346'
+CHAT_URI = 'ws://localhost:12346'
 
 
 class Transcription(ThreadExecutor):

@@ -1,6 +1,10 @@
 **.ipynb_checkpoints
 .vscode
 voice_note/outputs
+voice_note/pi-agent
+voice_note/server/node_modules
+tmp
+experiments
 
 *__pycache__*
 models
