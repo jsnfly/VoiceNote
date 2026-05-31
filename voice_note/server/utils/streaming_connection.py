@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from datetime import datetime
 from hashlib import md5
 from typing import List, Union
@@ -107,13 +108,17 @@ class StreamingConnection:
         return (self.communication_id is None) or (id_ == self.communication_id)
 
     def _setup_logger(self, name):
-        LOG_DIR.mkdir(exist_ok=True)
-
         self.logger = logging.getLogger(name)
+
+        if not os.getenv('DEBUG'):
+            self.logger.setLevel(logging.WARNING)
+            return
+
         self.logger.setLevel(logging.DEBUG)
         if self.logger.handlers:
             return
 
+        LOG_DIR.mkdir(exist_ok=True)
         file_handler = logging.FileHandler(f"{LOG_DIR}/{name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
         formatter = logging.Formatter('%(asctime)s,%(msecs)03d - %(levelname)s - %(message)s',
                                       datefmt='%Y-%m-%d %H:%M:%S')

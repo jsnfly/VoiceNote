@@ -12,60 +12,32 @@ from uuid import uuid4
 from server.base_server import BaseServer
 from server.utils.misc import BASE_DIR
 from server.utils.message import Message
-from server.utils.streaming_connection import POLL_INTERVAL
+from server.utils.streaming_connection import POLL_INTERVAL, StreamReset
 
 
 logger = logging.getLogger(__name__)
 
 TTS_URI = os.getenv('TTS_URI', 'ws://localhost:12347')
-PI_MODEL = os.getenv('PI_MODEL', 'Qwen3.5-9B-Q8_0')
-CHAT_AGENT_TOOLS = os.getenv('CHAT_AGENT_TOOLS', 'read-only')
-CHAT_AGENT_CWD = os.getenv('CHAT_AGENT_CWD', os.getcwd())
+CHAT_AGENT_CWD = os.getenv('CHAT_AGENT_CWD', str(BASE_DIR.parent))
 PI_AGENT_DIR = Path(os.getenv('PI_CODING_AGENT_DIR', BASE_DIR / 'pi-agent'))
-LLAMACPP_BASE_URL = os.getenv('LLAMACPP_BASE_URL', 'http://localhost:8080/v1')
+LLAMACPP_BASE_URL = os.getenv('LLAMACPP_BASE_URL')
 SERVER_DIR = BASE_DIR / 'server'
 LOCAL_PI_COMMAND = SERVER_DIR / 'node_modules' / '.bin' / 'pi'
 
 READ_ONLY_TOOLS = 'read,grep,find,ls'
 CODING_TOOLS = 'read,write,edit,bash,grep,find,ls'
+PI_MODEL = 'Qwen3.5-9B-Q8_0'
 
 
 def _write_pi_models_config() -> None:
     PI_AGENT_DIR.mkdir(parents=True, exist_ok=True)
-    models_path = PI_AGENT_DIR / 'models.json'
-    models_path.write_text(json.dumps({
-        'providers': {
-            'llamacpp': {
-                'baseUrl': LLAMACPP_BASE_URL,
-                'api': 'openai-completions',
-                'apiKey': 'llamacpp',
-                'compat': {
-                    'supportsDeveloperRole': False,
-                    'supportsReasoningEffort': False,
-                    'supportsUsageInStreaming': False,
-                    'maxTokensField': 'max_tokens',
-                    'thinkingFormat': 'qwen-chat-template',
-                },
-                'models': [{
-                    'id': PI_MODEL,
-                    'name': f'{PI_MODEL} llama.cpp',
-                    'reasoning': True,
-                    'input': ['text'],
-                    'contextWindow': 16384,
-                    'maxTokens': 2048,
-                    'cost': {
-                        'input': 0,
-                        'output': 0,
-                        'cacheRead': 0,
-                        'cacheWrite': 0,
-                    },
-                }],
-            },
-        },
-    }, indent=2) + '\n')
+    template = json.loads((BASE_DIR / 'pi-agent' / 'models.json').read_text())
+    if LLAMACPP_BASE_URL:
+        template['providers']['llamacpp']['baseUrl'] = LLAMACPP_BASE_URL
+    (PI_AGENT_DIR / 'models.json').write_text(json.dumps(template, indent=2) + '\n')
 
 
-def _get_pi_command() -> List[str]:
+def _get_pi_command(tools: str = 'read-only') -> List[str]:
     pi_command = os.getenv('PI_COMMAND')
     if pi_command:
         command = shlex.split(pi_command)
@@ -80,14 +52,14 @@ def _get_pi_command() -> List[str]:
 
     command += ['--mode', 'rpc', '--provider', 'llamacpp', '--model', PI_MODEL, '--thinking', 'off']
 
-    if CHAT_AGENT_TOOLS == 'coding':
+    if tools == 'coding':
         command += ['--tools', CODING_TOOLS]
-    elif CHAT_AGENT_TOOLS == 'read-only':
+    elif tools == 'read-only':
         command += ['--tools', READ_ONLY_TOOLS]
-    elif CHAT_AGENT_TOOLS == 'none':
+    elif tools == 'none':
         command += ['--no-tools']
-    elif CHAT_AGENT_TOOLS:
-        command += ['--tools', CHAT_AGENT_TOOLS]
+    elif tools:
+        command += ['--tools', tools]
 
     return command
 
@@ -249,6 +221,7 @@ class ChatServer(BaseServer):
         _write_pi_models_config()
         self.pi = PiRpcClient(_get_pi_command(), CHAT_AGENT_CWD)
         self.new_session_requested = False
+        logger.info('Pi agent: model=%s, cwd=%s', PI_MODEL, CHAT_AGENT_CWD)
 
         if tts_uri is not None:
             self.connections = {'tts': tts_uri}
@@ -269,25 +242,35 @@ class ChatServer(BaseServer):
         request_id = received[0]['id']
         user_text = received[0]['text']
 
+        display_text = user_text[:100] + '...' if len(user_text) > 100 else user_text
+        logger.info('[%s] Prompt: %s', request_id[:8], display_text)
+
         try:
             if self.new_session_requested:
                 await self.pi.new_session()
                 self.new_session_requested = False
 
+            chars = 0
             async for event in self.pi.prompt(user_text):
                 stream_text = self._extract_text_delta(event)
                 if stream_text:
                     self._send_text(request_id, stream_text, 'GENERATING')
+                    chars += len(stream_text)
 
                 self._forward_tts_messages()
                 await asyncio.sleep(POLL_INTERVAL)
 
             await self._finish_response(request_id)
+            logger.info('[%s] Complete: %s chars', request_id[:8], chars)
         except asyncio.CancelledError:
             await self.pi.abort()
             raise
+        except StreamReset:
+            await self.pi.abort()
+            logger.info('[%s] Aborted', request_id[:8])
+            raise
         except Exception:
-            logger.exception('Pi chat workload failed.')
+            logger.exception('[%s] Error', request_id[:8])
             self._send_text(request_id, 'Sorry, I ran into an error.', 'GENERATING')
             await self._finish_response(request_id)
 
@@ -332,4 +315,6 @@ class ChatServer(BaseServer):
 
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s [%(name)s] %(message)s',
+                        datefmt='%H:%M:%S')
     asyncio.run(ChatServer('0.0.0.0', '12346', TTS_URI).serve_forever())

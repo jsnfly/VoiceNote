@@ -1,7 +1,8 @@
 **.ipynb_checkpoints
 .vscode
 voice_note/outputs
-voice_note/pi-agent
+voice_note/pi-agent/*
+!voice_note/pi-agent/models.json
 voice_note/server/node_modules
 tmp
 experiments

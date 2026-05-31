@@ -120,12 +120,31 @@ The chat service writes `voice_note/pi-agent/models.json` automatically on start
 
 | Variable | Default | Description |
 |---|---|---|
-| `CHAT_AGENT_TOOLS` | `read-only` | Tool set for Pi: `read-only`, `coding`, `none`, or a custom comma-separated list |
-| `CHAT_AGENT_CWD` | current directory | Working directory for Pi's tools |
-| `PI_MODEL` | `Qwen3.5-9B-Q8_0` | Model ID to use |
+| `CHAT_AGENT_CWD` | project root | Working directory for Pi's tools |
 | `LLAMACPP_BASE_URL` | `http://localhost:8080/v1` | llama.cpp OpenAI-compatible API URL |
 | `PI_COMMAND` | auto-detected | Override the Pi executable path |
 | `TTS_URI` | `ws://localhost:12347` | TTS websocket URI |
+| `CHAT_URI` | `ws://localhost:12346` | Chat server WebSocket URI (for STT) |
+| `DEBUG` | (unset) | Set to enable per-connection debug log files in `logs/` |
+
+The rightmost 2 columns represent Docker defaults. On the host, the URIs default to `localhost` instead
+of the Docker service names.
+
+### Pi Agent Configuration
+
+The Pi coding agent reads its configuration from the working directory (`CHAT_AGENT_CWD`):
+
+- **`models.json`** in `voice_note/pi-agent/` defines the model provider. On startup, only the
+  `baseUrl` field is patched from `LLAMACPP_BASE_URL`; all other settings are read from the
+  committed file. To change the model or provider, edit this file directly.
+- **`.pi/APPEND_SYSTEM.md`** at the project root appends voice-output instructions to Pi's
+  default system prompt. Edit this file to customize how the agent phrases its spoken responses.
+
+### Debug Logging
+
+Set `DEBUG=1` to enable detailed per-connection log files in `logs/`. Each connection (client,
+chat, tts) writes a separate file with all sent and received messages. Useful for tracing
+interruption handling and message flow.
 
 ## Client
 

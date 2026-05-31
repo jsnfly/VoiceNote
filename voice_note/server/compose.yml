@@ -7,6 +7,8 @@ services:
       context: .
       dockerfile: stt/Dockerfile
     container_name: voice_note_stt
+    environment:
+      CHAT_URI: ws://chat:12346
     ports:
       - 12345:12345
     volumes:
@@ -31,8 +33,6 @@ services:
     container_name: voice_note_chat
     environment:
       CHAT_AGENT_CWD: /workspace
-      CHAT_AGENT_TOOLS: coding
-      PI_MODEL: Qwen3.5-9B-Q8_0
       LLAMACPP_BASE_URL: http://llamacpp:8080/v1
       TTS_URI: ws://tts:12347
     volumes:
