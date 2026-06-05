@@ -57,9 +57,9 @@ services:
       - --port
       - "8080"
       - --model
-      - /models/Qwen3.5-9B-Q8_0.gguf
+      - /models/gemma-4-26B-A4B-it-UD-IQ4_XS.gguf
       - --alias
-      - Qwen3.5-9B-Q8_0
+      - gemma-4-26B-A4B-it-UD-IQ4_XS
       - --ctx-size
       - "16384"
       - --gpu-layers
@@ -67,7 +67,7 @@ services:
       - --flash-attn
       - "on"
     volumes:
-      - ../models/chat/Qwen3.5-9B-GGUF:/models:ro
+      - ../models/chat/gemma-4-26B-A4B-it-GGUF:/models:ro
       - ../logs:/usr/src/app/logs
     expose:
       - 8080
