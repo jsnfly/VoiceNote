@@ -1,274 +1,435 @@
+from __future__ import annotations
+
 import asyncio
-from moshi.models.loaders import CheckpointInfo
-from moshi.models.tts import ConditionAttributes, Entry, LMGen, TTSModel
+import sys
 from pathlib import Path
+from types import ModuleType
+from typing import Any, Optional
+
 import torch
-import typing as tp
+from loguru import logger
+
+# Make the local dots.tts clone importable without a formal install.
+DOTS_TTS_ROOT = Path(__file__).resolve().parent / "dots.tts"
+DOTS_TTS_SRC = DOTS_TTS_ROOT / "src"
+for _path in (DOTS_TTS_ROOT, DOTS_TTS_SRC):
+    _path_str = str(_path)
+    if _path_str not in sys.path:
+        sys.path.insert(0, _path_str)
+
+
+def _install_optional_dep_stubs() -> None:
+    """Stub out optional text-normalization / language-detection deps.
+
+    dots.tts imports these unconditionally in ``utils.text``, but they are only
+    used when ``normalize_text=True`` or a language tag is requested. The TTS
+    server passes raw text through, so no-ops are sufficient.
+    """
+    if "tn" not in sys.modules:
+        tn = ModuleType("tn")
+        tn_english = ModuleType("tn.english")
+        tn_english_normalizer = ModuleType("tn.english.normalizer")
+        tn_chinese = ModuleType("tn.chinese")
+        tn_chinese_normalizer = ModuleType("tn.chinese.normalizer")
+
+        class _NopNormalizer:
+            def normalize(self, text: str) -> str:
+                return text
+
+        tn_english_normalizer.Normalizer = _NopNormalizer
+        tn_english.normalizer = tn_english_normalizer
+        tn.english = tn_english
+        tn_chinese_normalizer.Normalizer = _NopNormalizer
+        tn_chinese.normalizer = tn_chinese_normalizer
+        tn.chinese = tn_chinese
+        for _name, _mod in (
+            ("tn", tn),
+            ("tn.english", tn_english),
+            ("tn.english.normalizer", tn_english_normalizer),
+            ("tn.chinese", tn_chinese),
+            ("tn.chinese.normalizer", tn_chinese_normalizer),
+        ):
+            sys.modules[_name] = _mod
+
+    if "langcodes" not in sys.modules:
+        langcodes = ModuleType("langcodes")
+
+        class _Language:
+            language = "EN"
+
+            @classmethod
+            def get(cls, _code: str) -> Any:
+                return cls()
+
+            @classmethod
+            def find(cls, _code: str) -> Any:
+                return cls()
+
+            def prefer_macrolanguage(self) -> Any:
+                return self
+
+        langcodes.Language = _Language
+        sys.modules["langcodes"] = langcodes
+
+    if "lingua" not in sys.modules:
+        lingua = ModuleType("lingua")
+
+        class _Lng:
+            @classmethod
+            def all(cls) -> list[Any]:
+                return []
+
+        class _Detector:
+            def detect_language_of(self, _text: str) -> Any:
+                return None
+
+        class _Builder:
+            @classmethod
+            def from_languages(cls, *_languages: Any) -> Any:
+                return cls()
+
+            def build(self) -> Any:
+                return _Detector()
+
+        lingua.Language = _Lng
+        lingua.LanguageDetectorBuilder = _Builder
+        sys.modules["lingua"] = lingua
+
+
+_install_optional_dep_stubs()
+
+from dots_tts.runtime_double_streaming import (  # noqa: E402
+    DotsTtsRuntimeDoubleStreaming,
+    DoubleStreamingSession,
+)
 
 from server.base_server import BaseServer
 from server.utils.streaming_connection import POLL_INTERVAL, StreamReset
 
 
-DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-MODEL_DIR = Path('./models/tts-1.6b-en_fr')
-VOICE_PATH = Path('./models/tts-voices/expresso/ex01-ex02_fast_001_channel2_73s.wav.1e68beda@240.safetensors')
+DEVICE = "cuda"
+assert torch.cuda.is_available(), "dots.tts TTS server requires CUDA"
+
+MODEL_PATH = "/home/jonas/playground/s2t/voice_note/models/dots.tts-mf"
+VOICE_PATH = Path(__file__).resolve().parent / "sample.wav"
+
+PRECISION = "bfloat16"
+NUM_STEPS = 4
+GUIDANCE_SCALE = 1.2
+MAX_GENERATE_LENGTH = 500
+OPTIMIZE = True
+
+WARMUP_TEXT = "Warmup."
 
 
-class AsyncTTSGenerator:
+class AsyncDotsTTSGenerator:
+    """Async wrapper around a dots.tts double-streaming session.
+
+    The runtime is loaded once and reused for every utterance. A new
+    ``DoubleStreamingSession`` is created for each utterance and discarded on
+    finish or interrupt.
     """
-    A class to handle TTS generation asynchronously.
 
-    It manages the model state and runs the generation loop in a background task,
-    allowing for streaming of text input and audio output.
-    """
+    def __init__(self, runtime: DotsTtsRuntimeDoubleStreaming, voice_path: str):
+        self.runtime = runtime
+        self.voice_path = voice_path
+        self._text_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
+        self._audio_queue: asyncio.Queue[Optional[torch.Tensor]] = asyncio.Queue()
+        self._task: Optional[asyncio.Task] = None
+        self._started = False
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        # Currently active session, if any. ``interrupt()`` flips its
+        # ``end_flag`` to make the decode loop bail out promptly before
+        # cancelling the task. Cleared by the producer in a ``finally``.
+        self._current_session: Optional[DoubleStreamingSession] = None
 
-    def __init__(self, tts_model: TTSModel, condition_attributes: ConditionAttributes):
-        self.tts_model = tts_model
-        self.condition_attributes = condition_attributes
-        self.device = tts_model.lm.device
+    def _ensure_started(self) -> None:
+        if not self._started:
+            self._loop = asyncio.get_running_loop()
+            self._task = asyncio.create_task(self._run())
+            self._started = True
 
-        # Queues for communication with the generation loop
-        self.text_queue: asyncio.Queue[tp.Optional[Entry]] = asyncio.Queue()
-        self.audio_queue: asyncio.Queue[tp.Optional[torch.Tensor]] = asyncio.Queue()
+    async def push_text(self, text: str) -> None:
+        self._ensure_started()
+        await self._text_queue.put(text)
 
-        # State for the generation loop
-        self.lm_gen: tp.Optional[LMGen] = None
-        self.state: tp.Optional[tp.Any] = None
-        self.offset = 0
-        self.generation_task: tp.Optional[asyncio.Task] = None
-        self.finished = False
-        self.first_chunk_processed = False
+    async def finish(self) -> None:
+        self._ensure_started()
+        await self._text_queue.put(None)
 
-    def _on_text_hook(self, text_tokens: torch.Tensor):
-        """Hook to inject our text tokens into the generation process."""
-        predicted_token = text_tokens.item()
-        assert self.state is not None
+    async def get_audio_chunk(self) -> Optional[torch.Tensor]:
+        self._ensure_started()
+        return await self._audio_queue.get()
 
-        # If we are out of entries but more text might be coming,
-        # prevent the model from ending the generation prematurely.
-        if not self.state.entries and not self.state.queued and not self.finished:
-            if predicted_token == self.tts_model.machine.token_ids.new_word:
-                predicted_token = self.tts_model.machine.token_ids.pad
+    def audio_available(self) -> bool:
+        return not self._audio_queue.empty()
 
-        output_token, consumed_new_word = self.tts_model.machine.process(self.offset, self.state, predicted_token)
-        if consumed_new_word:
-            word, step = self.state.transcript[-1]
-            print(f"Step {step}: Model consumed word -> '{word}'")
-        text_tokens[0] = output_token
-
-    def _on_audio_hook(self, audio_tokens: torch.Tensor):
-        """Hook to handle initial audio delay."""
-        lm = self.tts_model.lm
-        machine = self.tts_model.machine
-        audio_offset = lm.audio_offset
-        delays = lm.delays
-        for q in range(audio_tokens.shape[1]):
-            delay = delays[q + audio_offset]
-            if self.offset < delay + self.tts_model.delay_steps:
-                audio_tokens[:, q] = machine.token_ids.zero
-
-    def _create_lm_gen(self) -> LMGen:
-        """Creates and configures the LMGen instance."""
-        assert self.tts_model.lm.condition_provider is not None
-        prepared = self.tts_model.lm.condition_provider.prepare([self.condition_attributes])
-        condition_tensors = self.tts_model.lm.condition_provider(prepared)
-
-        return LMGen(
-            self.tts_model.lm,
-            temp=self.tts_model.temp,
-            temp_text=self.tts_model.temp,
-            cfg_coef=self.tts_model.cfg_coef,
-            condition_tensors=condition_tensors,
-            on_text_hook=self._on_text_hook,
-            on_audio_hook=self._on_audio_hook,
-        )
-
-    async def _generation_loop(self):
-        """The main background task for generating audio."""
-        self.lm_gen = self._create_lm_gen()
-        self.state = self.tts_model.machine.new_state([])
-        self.offset = 0
-        mimi = self.tts_model.mimi
-        lm = self.tts_model.lm
-        machine = self.tts_model.machine
-
-        try:
-            with self.lm_gen.streaming(batch_size=1), mimi.streaming(batch_size=1):
-                while True:
-                    # If there's no work to do, wait for more text.
-                    # "Work" means having text in the queue, or having entries to process.
-                    if self.text_queue.empty() and (
-                        not self.state.entries and not self.state.queued and not self.finished
-                    ):
-                        await asyncio.sleep(POLL_INTERVAL)
-                        continue
-
-                    # Check for new text entries to add to the state machine
-                    while not self.text_queue.empty():
-                        entry = self.text_queue.get_nowait()
-                        if entry is None:
-                            # Sentinel from finish() was received. We don't need to do anything with it,
-                            # as self.finished is the source of truth.
-                            self.text_queue.put_nowait(None)  # Put back for any other logic that might check it.
-                            break
-                        assert self.state is not None
-                        self.state.entries.append(entry)
-
-                    # Check for termination conditions
-                    no_pending_entries = not self.state.entries and not self.state.queued
-                    end_signaled = self.state.end_step is not None
-
-                    if self.finished and no_pending_entries and end_signaled:
-                        if self.offset >= (
-                            self.state.end_step + self.tts_model.delay_steps + self.tts_model.final_padding
-                        ):
-                            break
-
-                    # Generate one step
-                    with torch.no_grad():
-                        missing_streams = lm.n_q - lm.dep_q
-                        input_tokens = torch.full((1, missing_streams, 1), machine.token_ids.zero, dtype=torch.long,
-                                                  device=self.device)
-                        frame = self.lm_gen.step(input_tokens)
-
-                        if frame is not None:
-                            audio_codes = frame[:, 1:, :]
-                            if (audio_codes < 0).any():
-                                pcm = torch.zeros(mimi.frame_size, device=self.device)
-                            else:
-                                pcm = mimi.decode(audio_codes)
-                                pcm = torch.clip(pcm.squeeze(0).squeeze(0), -1, 1)
-                            await self.audio_queue.put(pcm)
-
-                    self.offset += 1
-                    await asyncio.sleep(POLL_INTERVAL)  # Yield control
-        except asyncio.CancelledError:
-            print("Generation loop cancelled.")
-        finally:
-            await self.audio_queue.put(None)  # Sentinel to signal end of audio
-
-    async def start(self):
-        """Starts the generation background task."""
-        if self.generation_task and not self.generation_task.done():
-            return
-        self.generation_task = asyncio.create_task(self._generation_loop())
-
-    async def add_text(self, text: str):
-        """Adds a piece of text to be synthesized."""
-        print(f"---> Streaming in text: '{text}'")
-        entries = self.tts_model.prepare_script([text], padding_between=1)
-
-        if not self.first_chunk_processed:
-            if entries:
-                self.first_chunk_processed = True
-        else:
-            # This is a subsequent chunk, remove the speaker token that was added by prepare_script.
-            if entries and entries[0].tokens:
-                token_ids = self.tts_model.machine.token_ids
-                if entries[0].tokens[0] in [token_ids.main, token_ids.other]:
-                    entries[0].tokens.pop(0)
-
-        for entry in entries:
-            await self.text_queue.put(entry)
-
-    async def finish(self):
-        """Signals that no more text will be added."""
-        self.finished = True
-        await self.text_queue.put(None)
-
-    async def get_audio_chunk(self) -> tp.Optional[torch.Tensor]:
-        """Retrieves the next available chunk of audio."""
-        return await self.audio_queue.get()
-
-    async def restart(self):
-        """Stops the current generation and resets the state for a new one."""
-        print("\nRestarting generator...")
-        if self.generation_task:
-            self.generation_task.cancel()
+    async def interrupt(self) -> None:
+        """Stop the in-flight session and restart generation from scratch."""
+        # Tell any running session to bail out of its decode loop as soon as the
+        # current chunk finishes. ``finish_text()`` re-checks ``end_flag`` at
+        # the top of every iteration, so this avoids keeping the GPU busy on
+        # audio that will only be discarded. The flag is a private field of
+        # the model state, but the session exposes no public abort method.
+        session = self._current_session
+        if session is not None and not session.is_finished:
             try:
-                await self.generation_task
+                session._state.end_flag = True
+            except Exception:
+                pass
+
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
             except asyncio.CancelledError:
                 pass
-            self.generation_task = None
 
-        # Clear queues
-        self.audio_queue = asyncio.Queue()
-        self.text_queue = asyncio.Queue()
-        self.finished = False
-        self.first_chunk_processed = False
-        await self.start()
+        self._current_session = None
+
+        # Drain remaining queues.
+        for queue in (self._text_queue, self._audio_queue):
+            while not queue.empty():
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+
+        self._text_queue = asyncio.Queue()
+        self._audio_queue = asyncio.Queue()
+        self._task = asyncio.create_task(self._run())
+        self._started = True
+
+    async def warmup(self) -> None:
+        """Run a short throwaway synthesis so that CUDA caches/paths are warm."""
+        self._ensure_started()
+        await self._text_queue.put(WARMUP_TEXT)
+        await self._text_queue.put(None)
+        while True:
+            chunk = await self._audio_queue.get()
+            if chunk is None:
+                break
+
+    async def _drain_finish(
+        self,
+        session: DoubleStreamingSession,
+        audio_queue: asyncio.Queue[Optional[torch.Tensor]],
+    ) -> None:
+        """Stream tail audio from ``session.finish_text()`` into ``audio_queue``.
+
+        Each ``next()`` is dispatched to a worker thread via ``asyncio.to_thread``
+        so cancellation is observed between chunks.
+        """
+        gen = session.finish_text()
+        sentinel = object()
+        try:
+            while True:
+                chunk = await asyncio.to_thread(next, gen, sentinel)
+                if chunk is sentinel:
+                    break
+                await audio_queue.put(chunk.detach().cpu())
+            await audio_queue.put(None)
+        except asyncio.CancelledError:
+            # Don't push a ``None`` while being cancelled; ``interrupt()`` will
+            # drain and discard this queue anyway.
+            raise
+        except Exception:
+            logger.exception("finish_text failed")
+            await audio_queue.put(None)
+
+    async def _run(self) -> None:
+        # Capture the current audio queue locally. ``interrupt()`` swaps
+        # ``self._audio_queue`` for a fresh queue when starting a new session,
+        # so any chunk this task produces *after* that swap must land in the
+        # *old* queue - which ``interrupt()`` then drains and discards. Using
+        # ``self._audio_queue`` directly here would let a chunk from the
+        # cancelled session slip into the new stream and be played with the
+        # new request id.
+        audio_queue = self._audio_queue
+        try:
+            while True:
+                first_text = await self._text_queue.get()
+                if first_text is None:
+                    # Empty request: just signal end and wait for the next one.
+                    await audio_queue.put(None)
+                    continue
+
+                session = self.runtime.start_double_streaming(
+                    prompt_audio_path=self.voice_path,
+                    ode_method="euler",
+                    num_steps=NUM_STEPS,
+                    guidance_scale=GUIDANCE_SCALE,
+                    eos_threshold=0.8,
+                )
+                self._current_session = session
+
+                buffer = first_text
+                token_cursor = 0
+                token_ids: list[int] = []
+                finished = False
+
+                try:
+                    # The model can decide the audio is complete (set
+                    # ``end_flag``) before the consumer has pushed every text
+                    # token. The ``end_flag`` part of the condition lets us
+                    # bail out cooperatively; ``_drain_finish()`` then flushes
+                    # the tail audio via ``finish_text()``, which has a
+                    # dedicated "already at EOS" branch.
+                    while (
+                        not (finished and token_cursor >= len(token_ids))
+                        and not session._state.end_flag
+                    ):
+                        # Pull in any newly arrived text.
+                        got_new_text = False
+                        while True:
+                            try:
+                                item = self._text_queue.get_nowait()
+                            except asyncio.QueueEmpty:
+                                break
+                            if item is None:
+                                finished = True
+                            else:
+                                buffer += item
+                                got_new_text = True
+
+                        # Re-tokenize only when the buffer changed.
+                        if got_new_text:
+                            token_ids = self.runtime.model.tokenizer.encode(
+                                buffer.strip(), add_special_tokens=False
+                            )
+
+                        # Push all currently known tokens through the session.
+                        while (
+                            token_cursor < len(token_ids)
+                            and not session._state.end_flag
+                        ):
+                            token_id = token_ids[token_cursor]
+                            try:
+                                chunk = await asyncio.to_thread(
+                                    session.push_text_token, token_id
+                                )
+                            except RuntimeError:
+                                # ``end_flag`` may have been flipped by a
+                                # previous decode between the condition check
+                                # above and the worker thread entering
+                                # ``push_text_token``; treat that as a normal
+                                # end. Anything else propagates.
+                                if session._state.end_flag:
+                                    break
+                                raise
+                            token_cursor += 1
+                            if chunk is not None:
+                                await audio_queue.put(chunk.detach().cpu())
+                            # Yield briefly so cancellation / incoming text can be handled.
+                            await asyncio.sleep(0)
+
+                        if finished and token_cursor >= len(token_ids):
+                            break
+
+                        # Only sleep when waiting for more text or more tokens.
+                        await asyncio.sleep(POLL_INTERVAL)
+
+                    # Tail decoding runs cooperatively so cancellation can land
+                    # between chunks; the per-chunk ``to_thread`` keeps the GPU
+                    # busy without making the loop uncancellable.
+                    await self._drain_finish(session, audio_queue)
+                finally:
+                    if self._current_session is session:
+                        self._current_session = None
+        except asyncio.CancelledError:
+            logger.info("TTS generation task cancelled")
+        except Exception:
+            logger.exception("TTS generation task failed")
+            await audio_queue.put(None)
 
 
 class TTSServer(BaseServer):
     def __init__(self, host: str, port: int):
         super().__init__("tts", host, port)
-        checkpoint_info = CheckpointInfo.from_hf_repo(
-            "DUMMY_REPO",  # Repo name is not used when all paths are local
-            moshi_weights=MODEL_DIR / "dsm_tts_1e68beda@240.safetensors",
-            mimi_weights=MODEL_DIR / "tokenizer-e351c8d8-checkpoint125.safetensors",
-            tokenizer=MODEL_DIR / "tokenizer_spm_8k_en_fr_audio.model",
-            config_path=MODEL_DIR / "config.json",
+        runtime = DotsTtsRuntimeDoubleStreaming.from_pretrained(
+            MODEL_PATH,
+            precision=PRECISION,
+            optimize=OPTIMIZE,
+            max_generate_length=MAX_GENERATE_LENGTH,
         )
-        tts_model = TTSModel.from_checkpoint_info(checkpoint_info, n_q=32, temp=0.6, device=DEVICE)
-        condition_attributes = tts_model.make_condition_attributes([VOICE_PATH], cfg_coef=2.0)
-        self.generator = AsyncTTSGenerator(tts_model, condition_attributes)
-
+        self.generator = AsyncDotsTTSGenerator(runtime, VOICE_PATH)
         self.audio_config = {
-            'format': 1,  # 1 is pyaudio.paFloat32.
-            'channels': 1,
-            'rate': tts_model.mimi.sample_rate
+            "format": 1,  # pyaudio.paFloat32
+            "channels": 1,
+            "rate": runtime.sample_rate,
         }
+        self._warmed_up = False
+
+    async def serve_forever(self) -> None:
+        # Warm up CUDA paths once at server start so the first client
+        # connection doesn't pay for it. ``warmup()`` also starts the
+        # generator's producer task and captures the event loop reference,
+        # which has to happen on a running loop rather than from ``__init__``.
+        if not self._warmed_up:
+            logger.info("Running warmup synthesis...")
+            await self.generator.warmup()
+            self._warmed_up = True
+            logger.info("Warmup complete.")
+        await super().serve_forever()
 
     async def _handle_workload(self) -> None:
-        await self.generator.start()
+        current_id: Optional[str] = None
+        received: list[dict[str, Any]] = []
+        finished = False
 
-        current_id = None
-        received = []
         while True:
             try:
                 received += self._recv_client_messages()
 
-                # Discard data for a previous id. Necessary, because the StreamReset (and with that the clearing of
-                # `received`) happens only after it was attempted to send a response.
-                if len(received) > 1 and received[0]['id'] != received[-1]['id']:
-                    received = [data for data in received if data['id'] == received[-1]['id']]
+                # Discard stale data from a previous request id.
+                if len(received) > 1 and received[0]["id"] != received[-1]["id"]:
+                    received = [data for data in received if data["id"] == received[-1]["id"]]
 
                 if len(received) > 0:
-                    current_id = received[0]['id']
-                    text = ''.join(msg['text'] for msg in received)
-                    finished = received[-1]['status'] == 'FINISHED'
-
-                    if len(text.split()) >= 2 or finished:
-                        # Only add whole words or the end of the text.
-                        await self.generator.add_text(text)
-                        received = []
-                    if finished or text == 'Let me think about that.':
-                        # The generator seems to keep some kind of rolling window state and if we don't finish after
-                        # this, the audio will not be generated completely.
+                    current_id = received[0]["id"]
+                    text = "".join(msg["text"] for msg in received)
+                    finished = received[-1]["status"] == "FINISHED"
+                    await self.generator.push_text(text)
+                    received = []
+                    if finished:
                         await self.generator.finish()
 
-                if current_id is not None and not self.generator.audio_queue.empty():
+                while current_id is not None and self.generator.audio_available():
                     audio = await self.generator.get_audio_chunk()
+                    client = self.streams["client"]
                     if audio is None:
-                        if finished:
-                            # For 'Let me think..' `finished` will not be true.
-                            self.streams['client'].send({'audio': b'', 'status': 'FINISHED', 'id': current_id,
-                                                         'config': self.audio_config})
-                        await self.generator.restart()
+                        client.send(
+                            {
+                                "audio": b"",
+                                "status": "FINISHED",
+                                "id": current_id,
+                                "config": self.audio_config,
+                            }
+                        )
+                        # Do not interrupt the generator for a clean end-of-utterance;
+                        # it will wait for the next text on its own.
                         current_id = None
-                        finished = False  # Reset
+                        finished = False
                     else:
-                        bytes_ = audio.cpu().numpy().tobytes()
-                        self.streams['client'].send({'audio': bytes_, 'status': 'GENERATING', 'id': current_id,
-                                                     'config': self.audio_config})
+                        bytes_ = audio.float().squeeze().cpu().numpy().tobytes()
+                        client.send(
+                            {
+                                "audio": bytes_,
+                                "status": "GENERATING",
+                                "id": current_id,
+                                "config": self.audio_config,
+                            }
+                        )
 
                 await asyncio.sleep(POLL_INTERVAL)
             except StreamReset:
-                await self.generator.restart()
+                await self.generator.interrupt()
                 current_id = None
+                received = []
+                finished = False
             except ConnectionError:
                 break
 
 
-if __name__ == '__main__':
-    asyncio.run(TTSServer('0.0.0.0', '12347').serve_forever())
+if __name__ == "__main__":
+    asyncio.run(TTSServer("0.0.0.0", 12347).serve_forever())

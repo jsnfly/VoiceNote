@@ -1,1 +1,24 @@
-moshi==0.2.11
+# Minimal runtime dependencies for dots.tts (MF checkpoint).
+# WeTextProcessing, lingua-language-detector, langcodes and gradio are NOT
+# required because the server stubs them at import time.
+
+# Core torch / ML stack
+torch==2.8.0
+torchaudio==2.8.0
+transformers==4.57.0
+huggingface-hub
+safetensors==0.8.0rc0
+ninja
+
+# Audio / numeric / data
+librosa==0.11.0
+soundfile==0.13.1
+numpy==2.2.6
+
+# Utilities used by dots.tts
+loguru
+einops
+torchdiffeq
+tqdm
+pydantic==2.12.5
+PyYAML==6.0.3

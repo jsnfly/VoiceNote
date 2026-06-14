@@ -26,7 +26,7 @@ LOCAL_PI_COMMAND = SERVER_DIR / 'node_modules' / '.bin' / 'pi'
 
 READ_ONLY_TOOLS = 'read,grep,find,ls,set_thinking'
 CODING_TOOLS = 'read,write,edit,bash,grep,find,ls,set_thinking'
-PI_MODEL = 'gemma-4-26B-A4B'
+PI_MODEL = 'gemma-4-12B'
 
 
 def _write_pi_models_config() -> None:
