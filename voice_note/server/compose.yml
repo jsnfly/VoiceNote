@@ -59,13 +59,9 @@ services:
       - --model
       - /models/gemma-4-26B-A4B-it-UD-IQ4_XS.gguf
       - --alias
-      - gemma-4-26B-A4B-it-UD-IQ4_XS
+      - gemma-4-26B-A4B
       - --ctx-size
-      - "16384"
-      - --gpu-layers
-      - all
-      - --flash-attn
-      - "on"
+      - "65536"
     volumes:
       - ../models/chat/gemma-4-26B-A4B-it-GGUF:/models:ro
       - ../logs:/usr/src/app/logs

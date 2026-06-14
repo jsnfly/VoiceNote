@@ -4,29 +4,20 @@
       "baseUrl": "http://localhost:8080/v1",
       "api": "openai-completions",
       "apiKey": "llamacpp",
-      "compat": {
-        "supportsDeveloperRole": false,
-        "supportsReasoningEffort": false,
-        "supportsUsageInStreaming": false,
-        "maxTokensField": "max_tokens",
-        "thinkingFormat": "qwen-chat-template"
-      },
       "models": [
         {
-          "id": "Qwen3.5-9B-Q8_0",
-          "name": "Qwen3.5-9B-Q8_0 llama.cpp",
+          "id": "gemma-4-26B-A4B",
           "reasoning": true,
           "input": [
             "text"
           ],
-          "contextWindow": 16384,
-          "maxTokens": 2048,
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
+          "compat": {
+            "supportsDeveloperRole": false,
+            "supportsReasoningEffort": false,
+            "thinkingFormat": "qwen-chat-template"
+          },
+          "contextWindow": 65536,
+          "maxTokens": 32768
         }
       ]
     }
