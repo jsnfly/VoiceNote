@@ -57,13 +57,13 @@ services:
       - --port
       - "8080"
       - --model
-      - /models/gemma-4-12b-it-UD-Q6_K_XL.gguf
+      - /models/gemma-4-26B-A4B-it-UD-IQ4_XS.gguf
       - --alias
-      - gemma-4-12B
+      - gemma-4-26B-A4B
       - --ctx-size
       - "65536"
     volumes:
-      - ../models/chat/gemma-4-12b-it-GGUF:/models:ro
+      - ../models/chat/gemma-4-26B-A4B-it-GGUF:/models:ro
       - ../logs:/usr/src/app/logs
     expose:
       - 8080

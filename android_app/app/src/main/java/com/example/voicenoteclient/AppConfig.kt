@@ -8,7 +8,7 @@ object AppDefaults {
     const val HOST = "192.168.0.154"
     const val PORT = 12345
     const val INPUT_SAMPLE_RATE = 44100
-    const val OUTPUT_SAMPLE_RATE = 48000
+    const val OUTPUT_SAMPLE_RATE = 24000
 }
 
 data class ServerSettings(

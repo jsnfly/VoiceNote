@@ -7,8 +7,8 @@ A voice chat app that streams conversations with an LLM-based agent and stores t
 The server runs three WebSocket services, chained in a pipeline:
 
 - **STT** receives audio from the client, transcribes it with Whisper, then forwards the transcription to Chat and relays Chat/TTS responses back to the client.
-- **Chat** runs [Pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) in RPC mode, backed by a llama.cpp model server (gemma-4-12B). Text deltas stream from Pi to both the client (as text) and TTS (for synthesis).
-- **TTS** receives text chunks from Chat, synthesizes audio with [dots.tts](https://github.com/rednote-hilab/dots.tts) (the MeanFlow-distilled `rednote-hilab/dots.tts-mf` checkpoint) using zero-shot voice cloning from a reference audio prompt, and streams 48 kHz PCM audio back through STT to the client.
+- **Chat** runs [Pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) in RPC mode, backed by a llama.cpp model server (Qwen3.5-9B). Text deltas stream from Pi to both the client (as text) and TTS (for synthesis).
+- **TTS** receives text chunks from Chat, synthesizes audio with Kyutai TTS, and streams PCM audio back through STT to the client.
 
 All three services inherit from `BaseServer`, which manages the WebSocket connection lifecycle. The `StreamingConnection` class handles bidirectional send/recv with queues and ID-based message validation (see [Interruption Mechanism](#interruption-mechanism)).
 
@@ -75,22 +75,13 @@ The `PiRpcClient` class manages the subprocess lifecycle and provides `prompt()`
 
 ## Setup
 
-Clone the repo with its submodules (the TTS service depends on a vendored copy of
-[dots.tts](https://github.com/rednote-hilab/dots.tts)):
-
-```bash
-git clone --recurse-submodules <this-repo>
-# or, if you already cloned without --recurse-submodules:
-git submodule update --init
-```
-
-Then clone the model repositories into the `models` directory:
+Clone the model repositories into the `models` directory:
 
 1. **Speech-to-text**: https://huggingface.co/openai/whisper-medium → `models/whisper-medium`
-2. **Chat model**: https://huggingface.co/unsloth/gemma-4-12b-it-GGUF → `models/chat/gemma-4-12b-it-GGUF`
-   Place `gemma-4-12b-it-UD-Q6_K_XL.gguf` in that directory.
-3. **Text-to-speech**: https://huggingface.co/rednote-hilab/dots.tts-mf → `models/dots.tts-mf`
-   The `voice_note/server/tts/dots.tts/` directory is provided by the submodule above; the TTS server imports it from there at runtime. A CUDA GPU is required. For voice cloning, place a short reference WAV at `voice_note/server/tts/sample.wav` (the server reads it from there).
+2. **Chat model**: https://huggingface.co/unsloth/Qwen3.5-9B-GGUF → `models/chat/Qwen3.5-9B-GGUF`
+   Place `Qwen3.5-9B-Q8_0.gguf` in that directory. Optionally download `mmproj-F16.gguf` for multimodal support.
+3. **Text-to-speech**: https://huggingface.co/kyutai/tts-1.6b-en_fr → `models/tts-1.6b-en_fr`
+   and https://huggingface.co/kyutai/tts-voices → `models/tts-voices`
 
 ## Run (Docker)
 
@@ -169,18 +160,3 @@ Run from the `voice_note` directory. Install requirements from `client/requireme
 pip install pytest pytest-asyncio websockets
 cd voice_note && pytest -q
 ```
-
-## Android App
-
-Build a debug APK from the `android_app/` directory (requires a JDK and the
-Android SDK, typically via `ANDROID_HOME`):
-
-```bash
-cd android_app && ./gradlew assembleDebug
-```
-
-The unsigned debug APK is written to
-`android_app/app/build/outputs/apk/debug/app-debug.apk` and can be installed
-with `adb install`. The `app/build.gradle` does not configure a release
-signing key, so use `assembleRelease` only after adding a `signingConfig` to
-the `release` build type.

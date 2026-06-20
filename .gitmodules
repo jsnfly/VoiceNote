@@ -1,3 +1,0 @@
-[submodule "voice_note/server/tts/dots.tts"]
-	path = voice_note/server/tts/dots.tts
-	url = https://github.com/rednote-hilab/dots.tts.git

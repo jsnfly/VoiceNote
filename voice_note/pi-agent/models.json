@@ -6,7 +6,7 @@
       "apiKey": "llamacpp",
       "models": [
         {
-          "id": "gemma-4-12B",
+          "id": "gemma-4-26B-A4B",
           "reasoning": true,
           "input": [
             "text"
