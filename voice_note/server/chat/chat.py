@@ -258,7 +258,7 @@ class ChatServer(BaseServer):
                     chars += len(stream_text)
 
                 self._forward_tts_messages()
-                await asyncio.sleep(POLL_INTERVAL)
+                await asyncio.sleep(0)  # Yield control without adding latency
 
             await self._finish_response(request_id)
             logger.info('[%s] Complete: %s chars', request_id[:8], chars)

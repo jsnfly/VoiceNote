@@ -10,6 +10,8 @@ from server.utils.streaming_connection import POLL_INTERVAL, StreamReset
 
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+if DEVICE == 'cuda':
+    torch.backends.cudnn.benchmark = True
 MODEL_DIR = Path('./models/tts-1.6b-en_fr')
 VOICE_PATH = Path('./models/tts-voices/expresso/ex01-ex02_fast_001_channel2_73s.wav.1e68beda@240.safetensors')
 
@@ -26,6 +28,11 @@ class AsyncTTSGenerator:
         self.tts_model = tts_model
         self.condition_attributes = condition_attributes
         self.device = tts_model.lm.device
+
+        # Condition tensors are constant for a fixed voice; compute once and reuse.
+        assert tts_model.lm.condition_provider is not None
+        prepared = tts_model.lm.condition_provider.prepare([condition_attributes])
+        self.condition_tensors = tts_model.lm.condition_provider(prepared)
 
         # Queues for communication with the generation loop
         self.text_queue: asyncio.Queue[tp.Optional[Entry]] = asyncio.Queue()
@@ -69,16 +76,12 @@ class AsyncTTSGenerator:
 
     def _create_lm_gen(self) -> LMGen:
         """Creates and configures the LMGen instance."""
-        assert self.tts_model.lm.condition_provider is not None
-        prepared = self.tts_model.lm.condition_provider.prepare([self.condition_attributes])
-        condition_tensors = self.tts_model.lm.condition_provider(prepared)
-
         return LMGen(
             self.tts_model.lm,
             temp=self.tts_model.temp,
             temp_text=self.tts_model.temp,
             cfg_coef=self.tts_model.cfg_coef,
-            condition_tensors=condition_tensors,
+            condition_tensors=self.condition_tensors,
             on_text_hook=self._on_text_hook,
             on_audio_hook=self._on_audio_hook,
         )
@@ -91,6 +94,8 @@ class AsyncTTSGenerator:
         mimi = self.tts_model.mimi
         lm = self.tts_model.lm
         machine = self.tts_model.machine
+        input_tokens = torch.full((1, lm.n_q - lm.dep_q, 1), machine.token_ids.zero, dtype=torch.long,
+                                  device=self.device)
 
         try:
             with self.lm_gen.streaming(batch_size=1), mimi.streaming(batch_size=1):
@@ -125,10 +130,8 @@ class AsyncTTSGenerator:
                             break
 
                     # Generate one step
-                    with torch.no_grad():
-                        missing_streams = lm.n_q - lm.dep_q
-                        input_tokens = torch.full((1, missing_streams, 1), machine.token_ids.zero, dtype=torch.long,
-                                                  device=self.device)
+                    with torch.inference_mode():
+                        input_tokens.fill_(machine.token_ids.zero)
                         frame = self.lm_gen.step(input_tokens)
 
                         if frame is not None:
@@ -141,7 +144,7 @@ class AsyncTTSGenerator:
                             await self.audio_queue.put(pcm)
 
                     self.offset += 1
-                    await asyncio.sleep(POLL_INTERVAL)  # Yield control
+                    await asyncio.sleep(0)  # Yield control without adding latency
         except asyncio.CancelledError:
             print("Generation loop cancelled.")
         finally:
@@ -219,6 +222,17 @@ class TTSServer(BaseServer):
             'rate': tts_model.mimi.sample_rate
         }
 
+    async def warmup(self) -> None:
+        """Runs a short dummy generation to prime CUDA kernels and first-call paths."""
+        print("Warming up TTS...")
+        await self.generator.start()
+        await self.generator.add_text('Warmup.')
+        await self.generator.finish()
+        while await self.generator.get_audio_chunk() is not None:
+            pass
+        await self.generator.restart()
+        print("TTS warmup complete.")
+
     async def _handle_workload(self) -> None:
         await self.generator.start()
 
@@ -270,5 +284,11 @@ class TTSServer(BaseServer):
                 break
 
 
+async def main():
+    server = TTSServer('0.0.0.0', 12347)
+    await server.warmup()
+    await server.serve_forever()
+
+
 if __name__ == '__main__':
-    asyncio.run(TTSServer('0.0.0.0', '12347').serve_forever())
+    asyncio.run(main())
