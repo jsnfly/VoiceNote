@@ -256,16 +256,13 @@ class TTSServer(BaseServer):
                         # Only add whole words or the end of the text.
                         await self.generator.add_text(text)
                         received = []
-                    if finished or text == 'Let me think about that.':
-                        # The generator seems to keep some kind of rolling window state and if we don't finish after
-                        # this, the audio will not be generated completely.
+                    if finished:
                         await self.generator.finish()
 
                 if current_id is not None and not self.generator.audio_queue.empty():
                     audio = await self.generator.get_audio_chunk()
                     if audio is None:
                         if finished:
-                            # For 'Let me think..' `finished` will not be true.
                             self.streams['client'].send({'audio': b'', 'status': 'FINISHED', 'id': current_id,
                                                          'config': self.audio_config})
                         await self.generator.restart()

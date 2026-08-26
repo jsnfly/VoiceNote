@@ -36,18 +36,56 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	// DEBUG: log raw provider requests to stderr (visible in chat.py pi stderr logs)
+	// Forcefully apply the current thinking level to every outgoing provider request.
+	//
+	// WHY THIS IS NEEDED:
+	// pi-coding-agent's SDK builds the Agent without wiring `prepareNextTurn`
+	// (see pi-coding-agent dist/core/sdk.js: `new Agent({...})` omits it). As a
+	// result, pi-agent-core's agent loop snapshots `config.reasoning` once at the
+	// start of `runPromptMessages` (pi-agent-core/dist/agent.js:282) and does NOT
+	// refresh it between turns — the refresh block at
+	// pi-agent-core/dist/agent-loop.js:132-144 is skipped because
+	// `config.prepareNextTurn` is undefined. So a tool that calls
+	// `pi.setThinkingLevel(level)` mid-run updates `agent.state.thinkingLevel`
+	// immediately, but the agent's OWN next assistant turn in the same run still
+	// uses the OLD `reasoning`/`reasoningEffort` value. The new level only takes
+	// effect on the NEXT user prompt (a fresh `runPromptMessages`). This one-turn
+	// lag is the "doesn't work reliably" symptom.
+	//
+	// `before_provider_request` fires on every provider request with the FINAL
+	// built payload (post-buildParams, including `chat_template_kwargs`), and its
+	// return value REPLACES what gets sent. So we re-derive `enable_thinking`
+	// from the live `pi.getThinkingLevel()` here, bypassing the frozen
+	// `config.reasoning`. This makes a tool-invoked toggle take effect on the
+	// very next assistant turn.
+	//
+	// PROPER UPSTREAM FIX (not yet implemented as of pi 0.80.6 / main):
+	// wire `prepareNextTurn` in sdk.ts when constructing `new Agent({...})`,
+	// returning `{ thinkingLevel: this.thinkingLevel }`. The agent loop would
+	// then refresh `config.reasoning` each turn (agent-loop.js:138-142), exactly
+	// as the AgentHarness path already does (agent-harness.js:339,375). Until
+	// that lands upstream, this payload override is the reliable workaround.
+	//
+	// NOTE: for `thinkingFormat: "qwen-chat-template"`, pi-ai maps any non-"off"
+	// level to `enable_thinking: true` (binary). Gemma 4's chat template honors
+	// `enable_thinking` (injects/suppresses <|think|>), confirmed via GET /props.
+	// `preserve_thinking` is NOT a recognized llama.cpp kwarg and is dropped here.
 	pi.on("before_provider_request", async (event: BeforeProviderRequestEvent) => {
+		const payload = event.payload as Record<string, unknown>;
+		const level = pi.getThinkingLevel();
+		payload.chat_template_kwargs = { enable_thinking: level !== "off" };
+
 		console.error("=== PROVIDER REQUEST ===");
-		console.error(JSON.stringify(event.payload, null, 2));
+		const { tools: _tools, ...logPayload } = payload;
+		console.error(`thinking=${level} | ${JSON.stringify(logPayload)}`);
+		return payload;
 	});
 
-	// DEBUG: log response stream events that contain thinking/reasoning content
+	// DEBUG: log thinking-related response stream events
 	pi.on("message_update", async (event: MessageUpdateEvent) => {
 		const e = event.assistantMessageEvent;
-		if (e.type === "thinking_delta" || e.type === "thinking_start" || e.type === "thinking_end") {
+		if (e.type === "thinking_start" || e.type === "thinking_end") {
 			console.error(`=== RESPONSE ${e.type} ===`);
-			console.error(JSON.stringify(e, null, 2));
 		}
 	});
 }

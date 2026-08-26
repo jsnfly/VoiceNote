@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import shlex
 import shutil
 from collections import deque
@@ -21,12 +22,20 @@ TTS_URI = os.getenv('TTS_URI', 'ws://localhost:12347')
 CHAT_AGENT_CWD = os.getenv('CHAT_AGENT_CWD', str(BASE_DIR.parent))
 PI_AGENT_DIR = Path(os.getenv('PI_CODING_AGENT_DIR', BASE_DIR / 'pi-agent'))
 LLAMACPP_BASE_URL = os.getenv('LLAMACPP_BASE_URL')
+CHAT_TOOLS = os.getenv('CHAT_TOOLS', 'read-only')
 SERVER_DIR = BASE_DIR / 'server'
 LOCAL_PI_COMMAND = SERVER_DIR / 'node_modules' / '.bin' / 'pi'
 
 READ_ONLY_TOOLS = 'read,grep,find,ls,set_thinking'
-CODING_TOOLS = 'read,write,edit,bash,grep,find,ls,set_thinking'
+ALL_TOOLS = 'read,write,edit,bash,grep,find,ls,set_thinking'
 PI_MODEL = 'gemma-4-26B-A4B'
+
+_THINKING_PLACEHOLDERS = [
+    "Let me think about that...",
+    "Let me think...",
+    "Give me a moment...",
+    "Thinking about this...",
+]
 
 
 def _write_pi_models_config() -> None:
@@ -36,8 +45,16 @@ def _write_pi_models_config() -> None:
         template['providers']['llamacpp']['baseUrl'] = LLAMACPP_BASE_URL
     (PI_AGENT_DIR / 'models.json').write_text(json.dumps(template, indent=2) + '\n')
 
+    system_prompt_src = BASE_DIR / 'pi-agent' / 'SYSTEM.md'
+    system_prompt_dst = PI_AGENT_DIR / 'SYSTEM.md'
+    if system_prompt_src.exists() and (system_prompt_src != system_prompt_dst or not system_prompt_dst.exists()):
+        system_prompt_dst.write_text(system_prompt_src.read_text())
 
-def _get_pi_command(tools: str = 'read-only') -> List[str]:
+
+def _get_pi_command(tools: Union[str, None] = None) -> List[str]:
+    if tools is None:
+        tools = CHAT_TOOLS
+
     pi_command = os.getenv('PI_COMMAND')
     if pi_command:
         command = shlex.split(pi_command)
@@ -52,14 +69,13 @@ def _get_pi_command(tools: str = 'read-only') -> List[str]:
 
     command += ['--mode', 'rpc', '--provider', 'llamacpp', '--model', PI_MODEL, '--thinking', 'off']
 
-    if tools == 'coding':
-        command += ['--tools', CODING_TOOLS]
-    elif tools == 'read-only':
+    if (PI_AGENT_DIR / 'SYSTEM.md').exists():
+        command += ['--system-prompt', str(PI_AGENT_DIR / 'SYSTEM.md')]
+
+    if tools == 'all':
+        command += ['--tools', ALL_TOOLS]
+    else:
         command += ['--tools', READ_ONLY_TOOLS]
-    elif tools == 'none':
-        command += ['--no-tools']
-    elif tools:
-        command += ['--tools', tools]
 
     return command
 
@@ -251,7 +267,16 @@ class ChatServer(BaseServer):
                 self.new_session_requested = False
 
             chars = 0
+            placeholder_sent = False
             async for event in self.pi.prompt(user_text):
+                if (
+                    not placeholder_sent
+                    and event.get('type') == 'message_update'
+                    and event.get('assistantMessageEvent', {}).get('type') == 'thinking_start'
+                ):
+                    self._send_text(request_id, random.choice(_THINKING_PLACEHOLDERS))
+                    placeholder_sent = True
+
                 stream_text = self._extract_text_delta(event)
                 if stream_text:
                     self._send_text(request_id, stream_text, 'GENERATING')
@@ -285,10 +310,11 @@ class ChatServer(BaseServer):
 
         return assistant_event.get('delta', '')
 
-    def _send_text(self, request_id: str, text: str, status: str) -> None:
+    def _send_text(self, request_id: str, text: str, status: str = 'GENERATING') -> None:
         self.streams['client'].send({'status': 'GENERATING', 'text': text, 'id': request_id})
         if 'tts' in self.streams:
-            self.streams['tts'].send({'status': status, 'text': text, 'id': request_id})
+            msg = {'status': status, 'text': text, 'id': request_id}
+            self.streams['tts'].send(msg)
 
     async def _finish_response(self, request_id: str) -> None:
         if 'tts' not in self.streams:

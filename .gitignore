@@ -3,6 +3,8 @@
 voice_note/outputs
 voice_note/pi-agent/*
 !voice_note/pi-agent/models.json
+!voice_note/pi-agent/SYSTEM.md
+!voice_note/pi-agent/settings.json
 !voice_note/pi-agent/extensions
 voice_note/server/node_modules
 tmp
