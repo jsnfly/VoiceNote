@@ -12,7 +12,7 @@ services:
     ports:
       - 12345:12345
     volumes:
-      - ../models/whisper-medium:/usr/src/app/models/whisper-medium:ro
+      - ../models/nemotron-3.5-asr-streaming-0.6b:/usr/src/app/models/nemotron-3.5-asr-streaming-0.6b:ro
       - ../logs:/usr/src/app/logs
       - ../outputs:/usr/src/app/outputs
     user: 1000:1000

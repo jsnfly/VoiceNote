@@ -3,7 +3,7 @@ import os
 import torch
 from pathlib import Path
 from typing import List, Union
-from transformers import WhisperForConditionalGeneration, WhisperProcessor
+from transformers import AutoModelForRNNT, AutoProcessor
 
 from server.base_server import BaseServer, ThreadExecutor
 from websockets.asyncio.server import ServerConnection
@@ -15,8 +15,8 @@ from server.utils.sample import Sample
 from server.utils.streaming_connection import POLL_INTERVAL
 
 SAVE_DIR = BASE_DIR / 'outputs'
-MODEL_DIR = BASE_DIR / 'models/whisper-medium'
-LANG = 'de'
+MODEL_DIR = BASE_DIR / 'models/nemotron-3.5-asr-streaming-0.6b'
+LANG = 'auto'
 
 DEVICE, DTYPE = ('cuda:0', torch.float16) if torch.cuda.is_available() else ('cpu', torch.float32)
 
@@ -26,10 +26,8 @@ CHAT_URI = os.getenv('CHAT_URI', 'ws://localhost:12346')
 class Transcription(ThreadExecutor):
     def __init__(self):
         super().__init__()
-        self.processor = WhisperProcessor.from_pretrained(MODEL_DIR, local_files_only=True)
-        self.model = WhisperForConditionalGeneration.from_pretrained(
-            MODEL_DIR, use_safetensors=True, local_files_only=True, torch_dtype=DTYPE
-        )
+        self.processor = AutoProcessor.from_pretrained(MODEL_DIR, local_files_only=True)
+        self.model = AutoModelForRNNT.from_pretrained(MODEL_DIR, local_files_only=True, dtype=DTYPE)
         self.model.to(DEVICE)
 
     def blocking_fn(self, sample: Sample) -> str:

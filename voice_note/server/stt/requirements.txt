@@ -1,2 +1,4 @@
 PyAudio==0.2.14
 torchaudio==2.7.1
+transformers>=5.13.0
+librosa
