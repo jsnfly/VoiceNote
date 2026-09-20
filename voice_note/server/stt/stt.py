@@ -1,9 +1,10 @@
 import asyncio
 import os
+import pyaudio
 import torch
 from pathlib import Path
 from typing import List, Union
-from transformers import AutoModelForRNNT, AutoProcessor
+from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
 from server.base_server import BaseServer, ThreadExecutor
 from websockets.asyncio.server import ServerConnection
@@ -14,9 +15,7 @@ from server.utils.misc import BASE_DIR
 from server.utils.sample import Sample
 from server.utils.streaming_connection import POLL_INTERVAL
 
-SAVE_DIR = BASE_DIR / 'outputs'
-MODEL_DIR = BASE_DIR / 'models/nemotron-3.5-asr-streaming-0.6b'
-LANG = 'auto'
+MODEL_DIR = BASE_DIR / 'models/whisper-large-v3-turbo'
 
 DEVICE, DTYPE = ('cuda:0', torch.float16) if torch.cuda.is_available() else ('cpu', torch.float32)
 
@@ -26,13 +25,22 @@ CHAT_URI = os.getenv('CHAT_URI', 'ws://localhost:12346')
 class Transcription(ThreadExecutor):
     def __init__(self):
         super().__init__()
-        self.processor = AutoProcessor.from_pretrained(MODEL_DIR, local_files_only=True)
-        self.model = AutoModelForRNNT.from_pretrained(MODEL_DIR, local_files_only=True, dtype=DTYPE)
+        self.processor = WhisperProcessor.from_pretrained(MODEL_DIR, local_files_only=True)
+        self.model = WhisperForConditionalGeneration.from_pretrained(MODEL_DIR, local_files_only=True, dtype=DTYPE)
         self.model.to(DEVICE)
 
     def blocking_fn(self, sample: Sample) -> str:
-        sample.transcribe(self.model, self.processor, LANG)
+        sample.transcribe(self.model, self.processor)
         return sample.result
+
+    def warmup(self) -> None:
+        """Runs a short dummy transcription to prime CUDA kernels and first-call paths."""
+        if DEVICE == 'cpu':
+            return
+        print("Warming up STT...")
+        sample = Sample([b'\x00\x00' * 16_000], AudioConfig(pyaudio.paInt16, 1, 16_000))
+        self.blocking_fn(sample)
+        print("STT warmup complete.")
 
 
 class STTServer(BaseServer):
@@ -57,15 +65,10 @@ class STTServer(BaseServer):
         audio_messages = []
         for msg in super()._recv_client_messages():
             action = msg.get('action')
-            if action == 'DELETE CONVERSATION':
-                self.delete_entry(msg['save_path'])
-                self._new_conversation()
-                if 'chat' in self.streams:
-                    self.streams['chat'].reset(msg['id'])
-                    msg_for_chat = msg.copy()
-                    msg_for_chat['action'] = 'NEW CONVERSATION'
-                    self.streams['chat'].send(msg_for_chat)
-            elif action == 'NEW CONVERSATION':
+            if action in ('DELETE CONVERSATION', 'NEW CONVERSATION'):
+                if action == 'DELETE CONVERSATION':
+                    self.delete_entry(msg['save_path'])
+                    msg['action'] = 'NEW CONVERSATION'
                 self._new_conversation()
                 if 'chat' in self.streams:
                     self.streams['chat'].reset(msg['id'])
@@ -81,8 +84,7 @@ class STTServer(BaseServer):
         assert messages[0]['status'] == 'INITIALIZING'
 
         audio_config = AudioConfig(**messages[0]['audio_config'])
-        audio_bytes = b''.join([msg.get('audio', b'') for msg in messages])
-        sample = Sample(fragments=[audio_bytes], audio_config=audio_config)
+        sample = Sample(fragments=[msg.get('audio', b'') for msg in messages], audio_config=audio_config)
 
         transcription = await self.transcription.run(sample)
 
@@ -131,5 +133,11 @@ class STTServer(BaseServer):
             self.conversation.finalize_assistant_audio(assistant_audio_config)
 
 
+async def main():
+    server = STTServer('0.0.0.0', '12345', CHAT_URI)
+    server.transcription.warmup()
+    await server.serve_forever()
+
+
 if __name__ == '__main__':
-    asyncio.run(STTServer('0.0.0.0', '12345', CHAT_URI).serve_forever())
+    asyncio.run(main())

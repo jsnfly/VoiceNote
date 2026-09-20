@@ -6,18 +6,17 @@
       "apiKey": "llamacpp",
       "models": [
         {
-          "id": "gemma-4-26B-A4B",
+          "id": "qwen3.8-27b",
           "reasoning": true,
           "input": [
             "text"
           ],
           "compat": {
             "supportsDeveloperRole": false,
-            "supportsReasoningEffort": false,
-            "thinkingFormat": "qwen-chat-template"
+            "supportsReasoningEffort": true
           },
-          "contextWindow": 65536,
-          "maxTokens": 32768
+          "contextWindow": 32768,
+          "maxTokens": 8192
         }
       ]
     }

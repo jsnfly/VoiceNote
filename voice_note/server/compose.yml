@@ -12,7 +12,7 @@ services:
     ports:
       - 12345:12345
     volumes:
-      - ../models/nemotron-3.5-asr-streaming-0.6b:/usr/src/app/models/nemotron-3.5-asr-streaming-0.6b:ro
+      - ../models/whisper-large-v3-turbo:/usr/src/app/models/whisper-large-v3-turbo:ro
       - ../logs:/usr/src/app/logs
       - ../outputs:/usr/src/app/outputs
     user: 1000:1000
@@ -49,7 +49,7 @@ services:
       - voice_note_net
 
   llamacpp:
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda13
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
     container_name: voice_note_llamacpp
     command:
       - --host
@@ -57,13 +57,15 @@ services:
       - --port
       - "8080"
       - --model
-      - /models/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
+      - /models/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf
       - --alias
-      - gemma-4-26B-A4B
+      - qwen3.8-27b
       - --ctx-size
-      - "65536"
+      - "32768"
+      - "--spec-type"
+      - "draft-mtp"
     volumes:
-      - ../models/chat/gemma-4-26B-A4B-it-qat-GGUF:/models:ro
+      - ../models/chat/Qwen3.8-27B-GSQ-RCO-GGUF:/models:ro
       - ../logs:/usr/src/app/logs
     expose:
       - 8080

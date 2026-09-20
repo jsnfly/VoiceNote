@@ -28,7 +28,13 @@ LOCAL_PI_COMMAND = SERVER_DIR / 'node_modules' / '.bin' / 'pi'
 
 READ_ONLY_TOOLS = 'read,grep,find,ls,set_thinking'
 ALL_TOOLS = 'read,write,edit,bash,grep,find,ls,set_thinking'
-PI_MODEL = 'gemma-4-26B-A4B'
+PI_MODEL = 'qwen3.8-27b'
+
+USER_MSG_PREFIX = (
+    '[The text below is what the user said, auto-transcribed from speech. '
+    'Reply in plain conversational English without any markdown, symbols, '
+    'lists or emojis, unless the user asks for a different language.] '
+)
 
 _THINKING_PLACEHOLDERS = [
     "Let me think about that...",
@@ -169,7 +175,10 @@ class PiRpcClient:
                 yield event
 
                 if event.get('type') == 'agent_end':
-                    return
+                    if not event.get('willRetry'):
+                        return
+                    # pi auto-retries transient errors; keep consuming until the final run.
+                    continue
 
                 if event.get('type') == 'message_update':
                     assistant_event = event.get('assistantMessageEvent', {})
@@ -268,7 +277,8 @@ class ChatServer(BaseServer):
 
             chars = 0
             placeholder_sent = False
-            async for event in self.pi.prompt(user_text):
+            error_text = None
+            async for event in self.pi.prompt(USER_MSG_PREFIX + user_text):
                 if (
                     not placeholder_sent
                     and event.get('type') == 'message_update'
@@ -282,9 +292,14 @@ class ChatServer(BaseServer):
                     self._send_text(request_id, stream_text, 'GENERATING')
                     chars += len(stream_text)
 
+                if event.get('type') == 'agent_end':
+                    error_text = self._extract_agent_error(event)
+
                 self._forward_tts_messages()
                 await asyncio.sleep(0)  # Yield control without adding latency
 
+            if error_text:
+                self._send_text(request_id, error_text)
             await self._finish_response(request_id)
             logger.info('[%s] Complete: %s chars', request_id[:8], chars)
         except asyncio.CancelledError:
@@ -309,6 +324,21 @@ class ChatServer(BaseServer):
             return ''
 
         return assistant_event.get('delta', '')
+
+    @staticmethod
+    def _extract_agent_error(event: dict) -> Union[str, None]:
+        """Return the error text to send the user if the agent run failed."""
+        if event.get('willRetry'):
+            return None  # A retried run emits another agent_end; only judge the final one.
+
+        for message in reversed(event.get('messages') or []):
+            if message.get('role') != 'assistant':
+                continue
+            if message.get('stopReason') == 'error':
+                logger.error('Agent turn failed: %s', message.get('errorMessage', 'unknown error'))
+                return 'Sorry, I ran into an error.'
+            return None
+        return None
 
     def _send_text(self, request_id: str, text: str, status: str = 'GENERATING') -> None:
         self.streams['client'].send({'status': 'GENERATING', 'text': text, 'id': request_id})
