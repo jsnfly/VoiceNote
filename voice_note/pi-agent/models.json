@@ -1,7 +1,7 @@
 {
   "providers": {
     "llamacpp": {
-      "baseUrl": "http://localhost:8080/v1",
+      "baseUrl": "http://llamacpp:8080/v1",
       "api": "openai-completions",
       "apiKey": "llamacpp",
       "models": [

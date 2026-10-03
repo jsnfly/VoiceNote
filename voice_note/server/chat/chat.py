@@ -4,7 +4,6 @@ import logging
 import os
 import random
 import shlex
-import shutil
 from collections import deque
 from pathlib import Path
 from typing import AsyncIterator, List, Union
@@ -20,8 +19,8 @@ logger = logging.getLogger(__name__)
 
 TTS_URI = os.getenv('TTS_URI', 'ws://localhost:12347')
 CHAT_AGENT_CWD = os.getenv('CHAT_AGENT_CWD', str(BASE_DIR.parent))
-PI_AGENT_DIR = Path(os.getenv('PI_CODING_AGENT_DIR', BASE_DIR / 'pi-agent'))
-LLAMACPP_BASE_URL = os.getenv('LLAMACPP_BASE_URL')
+PI_AGENT_DIR = BASE_DIR / 'pi-agent'
+LLAMACPP_BASE_URL = os.getenv('LLAMACPP_BASE_URL', 'http://localhost:8080/v1')
 CHAT_TOOLS = os.getenv('CHAT_TOOLS', 'read-only')
 SERVER_DIR = BASE_DIR / 'server'
 LOCAL_PI_COMMAND = SERVER_DIR / 'node_modules' / '.bin' / 'pi'
@@ -46,32 +45,19 @@ _THINKING_PLACEHOLDERS = [
 
 def _write_pi_models_config() -> None:
     PI_AGENT_DIR.mkdir(parents=True, exist_ok=True)
-    template = json.loads((BASE_DIR / 'pi-agent' / 'models.json').read_text())
-    if LLAMACPP_BASE_URL:
-        template['providers']['llamacpp']['baseUrl'] = LLAMACPP_BASE_URL
+    template = json.loads((PI_AGENT_DIR / 'models.json').read_text())
+    template['providers']['llamacpp']['baseUrl'] = LLAMACPP_BASE_URL
     (PI_AGENT_DIR / 'models.json').write_text(json.dumps(template, indent=2) + '\n')
-
-    system_prompt_src = BASE_DIR / 'pi-agent' / 'SYSTEM.md'
-    system_prompt_dst = PI_AGENT_DIR / 'SYSTEM.md'
-    if system_prompt_src.exists() and (system_prompt_src != system_prompt_dst or not system_prompt_dst.exists()):
-        system_prompt_dst.write_text(system_prompt_src.read_text())
 
 
 def _get_pi_command(tools: Union[str, None] = None) -> List[str]:
     if tools is None:
         tools = CHAT_TOOLS
 
-    pi_command = os.getenv('PI_COMMAND')
-    if pi_command:
-        command = shlex.split(pi_command)
-    elif LOCAL_PI_COMMAND.exists():
+    if LOCAL_PI_COMMAND.exists():
         command = [str(LOCAL_PI_COMMAND)]
-    elif shutil.which('pi'):
-        command = ['pi']
-    elif shutil.which('npx'):
-        command = ['npx', '-y', '@earendil-works/pi-coding-agent']
     else:
-        command = ['pi']
+        command = ['pi']  # Resolved via PATH.
 
     command += ['--mode', 'rpc', '--provider', 'llamacpp', '--model', PI_MODEL, '--thinking', 'off']
 
@@ -101,7 +87,9 @@ class PiRpcClient:
 
         logger.info('Starting Pi RPC process: %s', shlex.join(self.command))
         env = os.environ.copy()
-        env.setdefault('PI_CODING_AGENT_DIR', str(PI_AGENT_DIR))
+        # Hard-set (not setdefault) so pi deterministically uses the repo's agent dir instead of
+        # whatever a globally exported PI_CODING_AGENT_DIR might point to.
+        env['PI_CODING_AGENT_DIR'] = str(PI_AGENT_DIR)
         env.setdefault('PI_SKIP_VERSION_CHECK', '1')
         env.setdefault('PI_TELEMETRY', '0')
         try:
@@ -115,8 +103,8 @@ class PiRpcClient:
             )
         except FileNotFoundError as exc:
             raise RuntimeError(
-                'Could not start Pi. Install @earendil-works/pi-coding-agent (requires Node >= 22), '
-                'install npx, or set PI_COMMAND to the Pi executable.'
+                'Could not start Pi. Run `npm install` in voice_note/server (requires Node >= 22) '
+                'or install @earendil-works/pi-coding-agent globally.'
             ) from exc
         self.stderr_task = asyncio.create_task(self._collect_stderr())
 
@@ -270,6 +258,7 @@ class ChatServer(BaseServer):
         display_text = user_text[:100] + '...' if len(user_text) > 100 else user_text
         logger.info('[%s] Prompt: %s', request_id[:8], display_text)
 
+        prompt_iter = None
         try:
             if self.new_session_requested:
                 await self.pi.new_session()
@@ -278,7 +267,8 @@ class ChatServer(BaseServer):
             chars = 0
             placeholder_sent = False
             error_text = None
-            async for event in self.pi.prompt(USER_MSG_PREFIX + user_text):
+            prompt_iter = self.pi.prompt(USER_MSG_PREFIX + user_text)
+            async for event in prompt_iter:
                 if (
                     not placeholder_sent
                     and event.get('type') == 'message_update'
@@ -303,16 +293,34 @@ class ChatServer(BaseServer):
             await self._finish_response(request_id)
             logger.info('[%s] Complete: %s chars', request_id[:8], chars)
         except asyncio.CancelledError:
-            await self.pi.abort()
+            await self._abort_prompt(prompt_iter)
             raise
         except StreamReset:
-            await self.pi.abort()
+            await self._abort_prompt(prompt_iter)
             logger.info('[%s] Aborted', request_id[:8])
             raise
         except Exception:
             logger.exception('[%s] Error', request_id[:8])
+            try:
+                await self._abort_prompt(prompt_iter)
+            except Exception:
+                pass
             self._send_text(request_id, 'Sorry, I ran into an error.', 'GENERATING')
             await self._finish_response(request_id)
+
+    async def _abort_prompt(self, prompt_iter: Union[AsyncIterator, None]) -> None:
+        """Close the prompt generator before aborting pi.
+
+        The generator holds the RPC lock across its yields. While it is suspended at a yield,
+        `pi.abort()` would wait for that lock forever. Closing the generator unwinds it
+        (releasing the lock) so the abort can proceed.
+        """
+        if prompt_iter is not None:
+            try:
+                await prompt_iter.aclose()
+            except Exception:
+                pass
+        await self.pi.abort()
 
     @staticmethod
     def _extract_text_delta(event: dict) -> str:

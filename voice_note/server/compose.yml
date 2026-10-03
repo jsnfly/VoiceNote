@@ -32,6 +32,7 @@ services:
       dockerfile: chat/Dockerfile
     container_name: voice_note_chat
     environment:
+      CHAT_TOOLS: all
       CHAT_AGENT_CWD: /workspace
       LLAMACPP_BASE_URL: http://llamacpp:8080/v1
       TTS_URI: ws://tts:12347

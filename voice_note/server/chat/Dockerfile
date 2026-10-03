@@ -8,8 +8,10 @@ ENV PI_TELEMETRY=0
 
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip && rm -rf /var/lib/apt/lists/*
 
-COPY package.json package.json
+COPY package.json server/package.json
+WORKDIR /usr/src/app/server
 RUN npm install --omit=dev
+WORKDIR /usr/src/app
 
 COPY chat/requirements.txt server/chat/requirements.txt
 RUN python3 -m pip install --break-system-packages --no-cache-dir -r server/chat/requirements.txt

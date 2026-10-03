@@ -44,10 +44,12 @@ class AudioPlayer(private val scope: CoroutineScope) {
     private fun startAudioJob() {
         scope.launch(Dispatchers.IO) {
             for (data in audioQueue) {
-                if (isPlaying) {
-                    if (data.isEmpty()) break
-                    audioTrack?.write(data, 0, data.size)
-                }
+                // Empty chunks (e.g. the FINISHED message) must be no-ops; breaking out here
+                // would kill the consumer and silently swallow all following audio.
+                if (!isPlaying || data.isEmpty()) continue
+                val track = audioTrack ?: break
+                // The track may be stopped/released concurrently when playback is interrupted.
+                runCatching { track.write(data, 0, data.size) }
             }
         }
     }
@@ -80,9 +82,8 @@ class AudioPlayer(private val scope: CoroutineScope) {
 
     fun terminateAudioProcessing() {
         stopAudio()
-        scope.launch {
-            audioQueue.send(shortArrayOf()) // Signal to terminate
-        }
+        // Closing the queue ends the consumer loop. Sending a terminating sentinel here would
+        // race with the close below (ClosedSendChannelException).
         audioQueue.close()
     }
 }

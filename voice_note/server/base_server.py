@@ -19,6 +19,7 @@ class ThreadExecutor:
             return result
         except asyncio.CancelledError:
             self.cancel_event.set()
+            raise
 
     def blocking_fn(self) -> Any:
         raise NotImplementedError
@@ -48,7 +49,13 @@ class BaseServer:
 
         tasks = self._create_tasks()
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-        first_exception = next((task.exception() for task in done if task.exception() is not None), None)
+        first_exception = None
+        for task in done:
+            if task.cancelled():
+                continue
+            if task.exception() is not None:
+                first_exception = task.exception()
+                break
         StreamingConnection.cancel_tasks(pending)
         for task in pending:
             try:

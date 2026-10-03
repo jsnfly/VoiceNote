@@ -1,10 +1,11 @@
 import asyncio
 import os
 import pyaudio
+import threading
 import torch
 from pathlib import Path
 from typing import List, Union
-from transformers import WhisperForConditionalGeneration, WhisperProcessor
+from transformers import StoppingCriteria, StoppingCriteriaList, WhisperForConditionalGeneration, WhisperProcessor
 
 from server.base_server import BaseServer, ThreadExecutor
 from websockets.asyncio.server import ServerConnection
@@ -22,6 +23,16 @@ DEVICE, DTYPE = ('cuda:0', torch.float16) if torch.cuda.is_available() else ('cp
 CHAT_URI = os.getenv('CHAT_URI', 'ws://localhost:12346')
 
 
+class CancelledGenerationCriteria(StoppingCriteria):
+    """Stops the whisper generation loop when the workload the transcription belongs to is cancelled."""
+
+    def __init__(self, cancel_event: threading.Event):
+        self.cancel_event = cancel_event
+
+    def __call__(self, input_ids, scores, **kwargs) -> bool:
+        return self.cancel_event.is_set()
+
+
 class Transcription(ThreadExecutor):
     def __init__(self):
         super().__init__()
@@ -30,7 +41,8 @@ class Transcription(ThreadExecutor):
         self.model.to(DEVICE)
 
     def blocking_fn(self, sample: Sample) -> str:
-        sample.transcribe(self.model, self.processor)
+        sample.transcribe(self.model, self.processor, StoppingCriteriaList([CancelledGenerationCriteria(
+            self.cancel_event)]))
         return sample.result
 
     def warmup(self) -> None:

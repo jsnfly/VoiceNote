@@ -61,7 +61,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _uiState.update { it.copy(transcriptionText = newText, savePath = savePath) }
                     }
                     msg[ProtocolKey.AUDIO] is ByteArray -> {
-                        repository.playAudio(msg[ProtocolKey.AUDIO] as ByteArray)
+                        val audioData = msg[ProtocolKey.AUDIO] as ByteArray
+                        // The FINISHED message carries an empty audio payload; playing it is a no-op.
+                        if (audioData.isNotEmpty()) {
+                            repository.playAudio(audioData)
+                        }
                     }
                     else -> {
                         Log.d(AppLog.TAG, msg[ProtocolKey.STATUS].toString())
