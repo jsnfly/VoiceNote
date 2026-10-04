@@ -14,7 +14,7 @@ services:
     volumes:
       - ../models/whisper-large-v3-turbo:/usr/src/app/models/whisper-large-v3-turbo:ro
       - ../logs:/usr/src/app/logs
-      - ../outputs:/usr/src/app/outputs
+      - ../../workspace:/usr/src/workspace
     user: 1000:1000
     deploy:
       resources:
@@ -39,7 +39,9 @@ services:
     volumes:
       - ../logs:/usr/src/app/logs
       - ../pi-agent:/usr/src/app/pi-agent
-      - ../..:/workspace
+      - ../../workspace:/workspace
+      # To also give the agent access to a code project, add a mount, e.g.:
+      # - ../..:/code
     expose:
       - 12346
     depends_on:

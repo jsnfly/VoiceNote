@@ -1,11 +1,11 @@
 import json
 import wave
-from pathlib import Path
 import time
 import numpy as np
 from typing import Dict, List
 
 from server.utils.audio import AudioConfig
+from server.utils.misc import BASE_DIR
 
 
 def _float_to_int16(audio_bytes: bytes) -> bytes:
@@ -19,7 +19,7 @@ class Conversation:
     def __init__(self):
         self.turns: List[Dict] = []
         self.assistant_audio_buffer = b""
-        self.save_dir = Path('outputs')
+        self.save_dir = BASE_DIR.parent / 'workspace' / 'conversations'
         self.save_path = self.save_dir / time.strftime("%Y%m%d-%H%M%S")
         self.save_path.mkdir(parents=True, exist_ok=True)
 

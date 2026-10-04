@@ -3,7 +3,7 @@
 # https://stackoverflow.com/a/246128
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
-mkdir -p "${SCRIPT_DIR}/../logs" "${SCRIPT_DIR}/../outputs" "${SCRIPT_DIR}/../pi-agent"
+mkdir -p "${SCRIPT_DIR}/../logs" "${SCRIPT_DIR}/../../workspace/conversations" "${SCRIPT_DIR}/../pi-agent"
 
 docker build -t voice_note_base:latest -f ${SCRIPT_DIR}/shared/Dockerfile ${SCRIPT_DIR}
 

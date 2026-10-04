@@ -5,7 +5,6 @@ import os
 import random
 import shlex
 from collections import deque
-from pathlib import Path
 from typing import AsyncIterator, List, Union
 from uuid import uuid4
 
@@ -18,7 +17,7 @@ from server.utils.streaming_connection import POLL_INTERVAL, StreamReset
 logger = logging.getLogger(__name__)
 
 TTS_URI = os.getenv('TTS_URI', 'ws://localhost:12347')
-CHAT_AGENT_CWD = os.getenv('CHAT_AGENT_CWD', str(BASE_DIR.parent))
+CHAT_AGENT_CWD = os.getenv('CHAT_AGENT_CWD', str(BASE_DIR.parent / 'workspace'))
 PI_AGENT_DIR = BASE_DIR / 'pi-agent'
 LLAMACPP_BASE_URL = os.getenv('LLAMACPP_BASE_URL', 'http://localhost:8080/v1')
 CHAT_TOOLS = os.getenv('CHAT_TOOLS', 'read-only')

@@ -90,7 +90,7 @@ cd voice_note/server
 ./run.sh
 ```
 
-This starts all four containers (stt, chat, llamacpp, tts) via Docker Compose. The chat service runs Pi in RPC mode with coding tools enabled and the repo mounted at `/workspace`.
+This starts all four containers (stt, chat, llamacpp, tts) via Docker Compose. The chat service runs Pi in RPC mode with coding tools enabled and the `workspace/` directory mounted at `/workspace`.
 
 ## Run (Host)
 
@@ -124,7 +124,7 @@ The chat service writes `voice_note/pi-agent/models.json` automatically on start
 
 | Variable | Default | Description |
 |---|---|---|
-| `CHAT_AGENT_CWD` | project root | Working directory for Pi's tools |
+| `CHAT_AGENT_CWD` | `workspace/` | Working directory for Pi's tools |
 | `CHAT_TOOLS` | `read-only` | Tools enabled for Pi (`read-only` or `all`) |
 | `LLAMACPP_BASE_URL` | `http://localhost:8080/v1` | llama.cpp API URL; written into `pi-agent/models.json` on startup |
 | `TTS_URI` | `ws://localhost:12347` | TTS websocket URI |
